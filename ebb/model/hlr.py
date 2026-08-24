@@ -42,11 +42,19 @@ class HalfLifeRegression:
         learning_rate: float = 0.001,
         half_life_weight: float = 0.01,   # alpha
         l2_weight: float = 0.1,           # lambda
+        warm_start_half_life: float | None = None,
     ) -> None:
         self.learning_rate = learning_rate
         self.half_life_weight = half_life_weight
         self.l2_weight = l2_weight
+        self.warm_start_half_life = warm_start_half_life
         self.weights: dict[str, float] = defaultdict(float)
+        # At theta = 0 every item has a half-life of exactly one day, but real
+        # review data sits two orders of magnitude above that. Starting the
+        # intercept at the data's median half-life means SGD spends its budget
+        # learning what makes items DIFFER instead of climbing to the mean.
+        if warm_start_half_life is not None:
+            self.weights["bias"] = math.log2(warm_start_half_life)
         self._feature_counts: dict[str, int] = defaultdict(int)
         self._seen = 0
 
@@ -105,6 +113,7 @@ class HalfLifeRegression:
                         "half_life_weight": self.half_life_weight,
                         "l2_weight": self.l2_weight,
                     },
+                    "warm_start_half_life": self.warm_start_half_life,
                     "instances_seen": self._seen,
                     "weights": dict(self.weights),
                 },
@@ -116,6 +125,7 @@ class HalfLifeRegression:
     def load(cls, path: str | Path) -> "HalfLifeRegression":
         blob = json.loads(Path(path).read_text())
         model = cls(**blob["hyperparameters"])
+        model.warm_start_half_life = blob.get("warm_start_half_life")
         model.weights = defaultdict(float, blob["weights"])
         model._seen = blob["instances_seen"]
         return model

@@ -1,0 +1,39 @@
+{
+ "dataset": "Duolingo 13M learning traces (doi:10.7910/DVN/N8XJME)",
+ "split": "by learner, 10% of users held out",
+ "train_instances": 1500000,
+ "test_instances": 300000,
+ "epochs": 1,
+ "results": {
+  "Ebb (half-life regression)": {
+   "n": 300000,
+   "mae_p": 0.1233134483932736,
+   "auc": 0.5511475135825664,
+   "spearman_h": 0.17421396419601912
+  },
+  "Logistic regression": {
+   "n": 300000,
+   "mae_p": 0.2010650326103903,
+   "auc": 0.5023044485970993,
+   "spearman_h": 0.6136659065745508
+  },
+  "Leitner (1972)": {
+   "n": 300000,
+   "mae_p": 0.21336210896217966,
+   "auc": 0.5574648588218653,
+   "spearman_h": -0.08403872018100646
+  },
+  "Pimsleur (1967)": {
+   "n": 300000,
+   "mae_p": 0.42054666408878133,
+   "auc": 0.5291421313545824,
+   "spearman_h": -0.11066439139289255
+  },
+  "Constant half-life": {
+   "n": 300000,
+   "mae_p": 0.11471049035444499,
+   "auc": 0.5487841808309607,
+   "spearman_h": NaN
+  }
+ }
+}
