@@ -1,0 +1,46 @@
+{
+ "collections": 4,
+ "base_rate": 0.9519745226714358,
+ "ours": {
+  "Ebb (DSR, ours)": {
+   "n": 143429,
+   "log_loss": 0.14876395963620764,
+   "rmse_bins": 0.10280239959851015,
+   "auc": 0.6909440358437264
+  },
+  "HLR (ACL 2016, ours)": {
+   "n": 143429,
+   "log_loss": 0.9424468411560541,
+   "rmse_bins": 0.5515058409568558,
+   "auc": 0.5016444471476431
+  },
+  "AVG (predict the mean)": {
+   "n": 143429,
+   "log_loss": 0.10073629187665266,
+   "rmse_bins": 0.045462412569690774,
+   "auc": 0.5
+  }
+ },
+ "published": {
+  "RWKV-P (benchmark best)": {
+   "log_loss": 0.2773,
+   "rmse_bins": 0.02502,
+   "auc": 0.8329
+  },
+  "FSRS-6 (ships in Anki)": {
+   "log_loss": 0.346,
+   "rmse_bins": 0.0653,
+   "auc": 0.7034
+  },
+  "HLR (Settles & Meeder 2016)": {
+   "log_loss": 0.4694,
+   "rmse_bins": 0.1275,
+   "auc": 0.6369
+  },
+  "AVG (predict the mean)": {
+   "log_loss": 0.3945,
+   "rmse_bins": 0.1034,
+   "auc": 0.4997
+  }
+ }
+}
