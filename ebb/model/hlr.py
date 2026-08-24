@@ -62,7 +62,8 @@ class HalfLifeRegression:
 
     def predict_half_life(self, features) -> float:
         dot = sum(self.weights[name] * value for name, value in features)
-        return clamp(2.0 ** dot, MIN_HALF_LIFE, MAX_HALF_LIFE)
+        # Guard the exponent: a diverging run can otherwise overflow the float.
+        return clamp(2.0 ** clamp(dot, -30.0, 30.0), MIN_HALF_LIFE, MAX_HALF_LIFE)
 
     def predict_recall(self, features, t: float) -> tuple[float, float]:
         """Return (probability of recall after t days, predicted half-life)."""

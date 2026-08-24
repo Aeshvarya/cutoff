@@ -55,13 +55,30 @@ def observed_half_life(p: float, t: float) -> float:
     return clamp(-t / math.log(p, 2), MIN_HALF_LIFE, MAX_HALF_LIFE)
 
 
-def build_features(history_correct: int, history_wrong: int, item_id: str) -> tuple[tuple[str, float], ...]:
-    return (
+def build_features(
+    history_correct: int,
+    history_wrong: int,
+    item_id: str,
+    prior_interval_days: float | None = None,
+) -> tuple[tuple[str, float], ...]:
+    """The paper's feature set, plus one optional extra.
+
+    `prior_interval_days` is the total spacing the item has already survived. The
+    paper does not use it, but under an adaptive scheduler it is the only thing
+    in reach that stands in for how STABLE the memory is -- and without some
+    such proxy a model cannot tell "long gap because it is easy" apart from
+    "long gap because it was neglected". Passing it lets us measure exactly how
+    much of the gap between HLR and a DSR model is explained by that one idea.
+    """
+    features = [
         ("right", math.sqrt(1 + history_correct)),
         ("wrong", math.sqrt(1 + history_wrong)),
         (f"item:{item_id}", 1.0),
         ("bias", 1.0),
-    )
+    ]
+    if prior_interval_days is not None:
+        features.append(("prior_interval", math.sqrt(1.0 + max(prior_interval_days, 0.0))))
+    return tuple(features)
 
 
 def instance_from_row(row: dict[str, str]) -> Instance | None:
