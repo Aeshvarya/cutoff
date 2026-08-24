@@ -11,3 +11,4 @@ data/anki/
 data/*.tsv
 CLAUDE.md
 .claude/
+.venv/
