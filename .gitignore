@@ -7,3 +7,5 @@ node_modules/
 web/dist/
 .DS_Store
 results/
+data/anki/
+data/*.tsv
