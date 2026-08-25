@@ -40,9 +40,20 @@ class CardState:
                             # +14 means "a review is planned in a fortnight".
 
     def recall_on(self, day: float, parameters: np.ndarray) -> float:
-        """Probability of recalling this card on `day`, where today is day 0."""
-        elapsed = max(day - self.last_review_day, 0.0)
-        return float(retrievability(elapsed, self.stability, parameters[15]))
+        """Probability of recalling this card on `day`, where today is day 0.
+
+        This reads the card's CURRENT state, so it is only meaningful for a day
+        at or after its last review. Asking about an earlier day would silently
+        credit you with a review that has not happened yet -- which is exactly
+        the bug that made "cram in November" appear to help a September exam.
+        Use `state_on` to evaluate a schedule at more than one date.
+        """
+        if day < self.last_review_day - 1e-9:
+            raise ValueError(
+                f"card {self.card_id} was last reviewed on day {self.last_review_day}, "
+                f"which is after day {day}; replay the schedule with state_on() instead"
+            )
+        return float(retrievability(day - self.last_review_day, self.stability, parameters[15]))
 
 
 @dataclass
@@ -154,3 +165,30 @@ def review_outcome(
         difficulty=expected_difficulty,
         last_review_day=day,
     )
+
+
+def state_on(
+    cards: list[CardState],
+    schedule: list[tuple[float, str]],
+    day: float,
+    parameters: np.ndarray,
+) -> dict[str, CardState]:
+    """Replay a schedule up to `day` and return the card states as of then.
+
+    Only reviews that have actually happened by `day` are applied. This is what
+    makes a multi-deadline forecast honest: what you know at the mid-sem cannot
+    depend on the revision you will do in November.
+    """
+    states = {
+        c.card_id: CardState(c.card_id, c.concept, c.stability, c.difficulty, c.last_review_day)
+        for c in cards
+    }
+    for when, card_id in sorted(schedule):
+        if when > day:
+            break
+        states[card_id] = review_outcome(states[card_id], when, parameters)
+    return states
+
+
+def recall_at(states: dict[str, CardState], day: float, parameters: np.ndarray) -> float:
+    return float(np.mean([c.recall_on(day, parameters) for c in states.values()]))

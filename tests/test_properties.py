@@ -17,7 +17,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from ebb.core.forecast import CardState, project, review_outcome
+from ebb.core.forecast import CardState, project, recall_at, review_outcome, state_on
 from ebb.core.planner import compare_to_cramming, plan
 from ebb.model.dsr import INITIAL_PARAMETERS as W
 from ebb.model.dsr import retrievability
@@ -106,6 +106,44 @@ def test_planner_improves_on_doing_nothing():
         c.card_id = f"c{i}"
     result = plan(cards, EXAM, W, target_recall=0.9, max_reviews_per_day=10)
     assert result.recall_after > result.recall_before
+
+
+def test_a_future_review_cannot_help_an_earlier_exam():
+    """The bug this test exists for: asking a card about a day BEFORE its last
+    review silently credited a review that had not happened, which made
+    "revise in November" appear to improve a September exam."""
+    card = a_card(stability=5.0, last_review_day=-5)
+    reviewed_late = review_outcome(card, 60, W)
+    try:
+        reviewed_late.recall_on(20, W)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("querying before the last review must refuse, not clamp")
+
+
+def test_state_on_replays_only_what_has_happened():
+    cards = [a_card(stability=5.0, last_review_day=-5)]
+    cards[0].card_id = "c0"
+    schedule = [(60.0, "c0")]          # a review after the first exam
+    at_20 = recall_at(state_on(cards, schedule, 20, W), 20, W)
+    untouched = recall_at(state_on(cards, [], 20, W), 20, W)
+    assert abs(at_20 - untouched) < 1e-12
+
+
+def test_two_exam_frontier_is_a_real_trade_off():
+    """Caring only about the first exam must beat caring only about the second
+    AT the first exam, and lose at the second. If one weight won both, there
+    would be no frontier and the feature would be theatre."""
+    from ebb.core.multi import plan_two_exams
+
+    cards = [a_card(stability=6.0, last_review_day=-6) for _ in range(40)]
+    for i, c in enumerate(cards):
+        c.card_id = f"c{i}"
+    early = plan_two_exams(cards, 15, 60, W, weight=1.0, budget=40, max_reviews_per_day=8)
+    later = plan_two_exams(cards, 15, 60, W, weight=0.0, budget=40, max_reviews_per_day=8)
+    assert early.recall_first > later.recall_first
+    assert later.recall_second > early.recall_second
 
 
 def test_capacity_creates_a_point_of_no_return():
