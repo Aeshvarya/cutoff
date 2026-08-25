@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ebb — what you'll remember on exam morning</title>
+<style>
+/* ---------------------------------------------------------------
+   Tokens. Chart colors come from a validated categorical palette;
+   status colors are reserved and never used to mean "series 4".
+   --------------------------------------------------------------- */
+:root {
+  color-scheme: dark;
+  --bg:            #0d0d0c;
+  --surface-1:     #1a1a19;   /* the surface the charts are validated against */
+  --surface-2:     #232320;
+  --border:        #2f2f2b;
+  --border-strong: #45443f;
+
+  --text-primary:   #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted:     #8a897e;
+
+  --series-1: #3987e5;   /* blue   */
+  --series-2: #d95926;   /* orange */
+  --series-3: #199e70;   /* aqua   */
+  --context:  #4a4a45;   /* de-emphasis gray for "rest are context" */
+
+  --good:     #0ca30c;
+  --warning:  #fab219;
+  --serious:  #ec835a;
+  --critical: #d03b3b;
+
+  --r: 10px;
+  --pad: clamp(16px, 3vw, 32px);
+  --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+.num { font-variant-numeric: tabular-nums; }
+
+/* ---------- shell ---------- */
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 var(--pad) 96px; }
+
+header.top {
+  display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+  padding: 34px 0 22px;
+}
+.mark {
+  font-size: 27px; font-weight: 620; letter-spacing: -0.035em;
+  display: flex; align-items: baseline; gap: 9px;
+}
+.mark .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--series-1); display: inline-block; transform: translateY(-2px);
+}
+.tag { color: var(--text-muted); font-size: 14px; letter-spacing: -0.01em; }
+
+nav.tabs {
+  display: flex; gap: 2px; border-bottom: 1px solid var(--border);
+  margin-bottom: 30px; overflow-x: auto;
+}
+nav.tabs button {
+  appearance: none; background: none; border: 0; border-bottom: 2px solid transparent;
+  color: var(--text-muted); font: inherit; font-size: 14px; font-weight: 500;
+  padding: 11px 15px; cursor: pointer; white-space: nowrap;
+  margin-bottom: -1px; transition: color .15s, border-color .15s;
+}
+nav.tabs button:hover { color: var(--text-secondary); }
+nav.tabs button[aria-selected="true"] { color: var(--text-primary); border-bottom-color: var(--series-1); }
+
+section.screen { display: none; }
+section.screen.active { display: block; animation: rise .32s cubic-bezier(.22,.61,.36,1); }
+@keyframes rise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+
+/* ---------- cards ---------- */
+.card {
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: var(--r); padding: var(--pad);
+}
+.card + .card { margin-top: 18px; }
+.grid { display: grid; gap: 18px; }
+@media (min-width: 860px) { .grid.two { grid-template-columns: 1.35fr 1fr; } }
+
+h2.title { font-size: 17px; font-weight: 600; letter-spacing: -0.015em; margin: 0 0 3px; }
+p.sub { color: var(--text-muted); font-size: 13.5px; margin: 0 0 20px; max-width: 62ch; }
+p.note { color: var(--text-muted); font-size: 12.5px; margin: 14px 0 0; max-width: 68ch; }
+
+/* ---------- hero figure ---------- */
+.hero { display: flex; align-items: flex-end; gap: 20px; flex-wrap: wrap; }
+.hero .fig {
+  font-size: clamp(66px, 12vw, 104px); font-weight: 640;
+  letter-spacing: -0.05em; line-height: .84;
+}
+.hero .cap { color: var(--text-secondary); font-size: 14.5px; padding-bottom: 8px; max-width: 30ch; }
+
+/* ---------- stat row ---------- */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px,1fr)); gap: 1px;
+         background: var(--border); border: 1px solid var(--border); border-radius: var(--r);
+         overflow: hidden; margin-top: 22px; }
+.stat { background: var(--surface-1); padding: 15px 17px; }
+.stat .k { color: var(--text-muted); font-size: 11.5px; text-transform: uppercase;
+           letter-spacing: .07em; font-weight: 600; }
+.stat .v { font-size: 25px; font-weight: 600; letter-spacing: -0.03em; margin-top: 4px; }
+.stat .v small { font-size: 14px; font-weight: 500; color: var(--text-muted); letter-spacing: 0; }
+
+/* ---------- controls ---------- */
+.controls { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 22px; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field label { color: var(--text-muted); font-size: 11.5px; text-transform: uppercase;
+               letter-spacing: .07em; font-weight: 600; }
+.field input, .field select {
+  background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text-primary);
+  border-radius: 7px; padding: 8px 11px; font: inherit; font-size: 14px; min-width: 120px;
+}
+.field input:focus, .field select:focus { outline: 2px solid var(--series-1); outline-offset: 1px; }
+
+button.action {
+  background: var(--series-1); color: #fff; border: 0; border-radius: 7px;
+  padding: 9px 18px; font: inherit; font-size: 14px; font-weight: 560; cursor: pointer;
+}
+button.action:hover { filter: brightness(1.08); }
+button.action.ghost { background: transparent; border: 1px solid var(--border-strong); color: var(--text-secondary); }
+
+/* ---------- self test ---------- */
+.course { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 14px;
+          padding: 13px 0; border-bottom: 1px solid var(--border); }
+.course:last-child { border-bottom: 0; }
+.course .name { font-weight: 520; font-size: 14.5px; }
+.course .meta { color: var(--text-muted); font-size: 12.5px; }
+.grades { display: flex; gap: 5px; }
+.grades button {
+  background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text-secondary);
+  border-radius: 6px; padding: 6px 11px; font: inherit; font-size: 12.5px; cursor: pointer;
+  transition: all .12s;
+}
+.grades button[aria-pressed="true"] { background: var(--series-1); border-color: var(--series-1); color: #fff; }
+
+/* ---------- table ---------- */
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+th, td { text-align: right; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--text-muted); font-size: 11.5px; text-transform: uppercase;
+     letter-spacing: .06em; font-weight: 600; }
+tr.ours td { background: rgba(57,135,229,.09); }
+tr.ours td:first-child { font-weight: 600; box-shadow: inset 2px 0 0 var(--series-1); }
+tbody tr:last-child td { border-bottom: 0; }
+.scroll { overflow-x: auto; }
+
+/* ---------- chart chrome ---------- */
+figure { margin: 0; }
+figcaption { color: var(--text-muted); font-size: 12.5px; margin-top: 12px; }
+svg { display: block; width: 100%; height: auto; overflow: visible; }
+.legend { display: flex; gap: 16px; flex-wrap: wrap; margin: 0 0 14px; padding: 0; list-style: none;
+          font-size: 12.5px; color: var(--text-secondary); }
+.legend li { display: flex; align-items: center; gap: 7px; }
+.legend .swatch { width: 11px; height: 3px; border-radius: 2px; }
+
+.tip {
+  position: fixed; pointer-events: none; opacity: 0; transition: opacity .1s;
+  background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 7px;
+  padding: 8px 11px; font-size: 12.5px; z-index: 40; box-shadow: 0 6px 24px rgba(0,0,0,.5);
+  max-width: 230px;
+}
+.tip .th { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.tip .tv { font-weight: 600; font-size: 14px; }
+
+.verdict { border-left: 2px solid var(--critical); padding: 3px 0 3px 15px; margin-top: 22px; }
+.verdict .big { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
+.verdict .small { color: var(--text-secondary); font-size: 13.5px; margin-top: 3px; }
+.verdict.ok { border-left-color: var(--good); }
+
+.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 560;
+        padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border-strong);
+        color: var(--text-secondary); }
+.pill .d { width: 6px; height: 6px; border-radius: 50%; }
+
+.loading { color: var(--text-muted); font-size: 13.5px; padding: 40px 0; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="mark"><span class="dot"></span>Ebb</div>
+    <div class="tag">what you'll remember on exam morning — and the last day you can still fix it</div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-screen="syllabus" aria-selected="true">1 · Your syllabus</button>
+    <button role="tab" data-screen="forecast" aria-selected="false">2 · The forecast</button>
+    <button role="tab" data-screen="deadline" aria-selected="false">3 · The deadline</button>
+    <button role="tab" data-screen="proof" aria-selected="false">4 · Does it actually work?</button>
+  </nav>
+
+  <!-- ================= 1. SYLLABUS ================= -->
+  <section class="screen active" id="screen-syllabus">
+    <div class="card">
+      <h2 class="title">Grade yourself, once.</h2>
+      <p class="sub">You have no review history yet, so Ebb has nothing to forecast from. This
+        self-test <em>is</em> your first review — the model turns each grade into a memory
+        stability the same way it would treat anyone's first look at a card. Nothing here is
+        invented for a demo.</p>
+
+      <div class="controls">
+        <div class="field">
+          <label for="examdate">Exam date</label>
+          <input type="date" id="examdate">
+        </div>
+        <div class="field">
+          <label for="cap">Cards you'll sit through a night</label>
+          <input type="number" id="cap" value="40" min="5" max="300" step="5">
+        </div>
+        <div class="field">
+          <label for="target">Target on exam day</label>
+          <select id="target">
+            <option value="0.95">95%</option>
+            <option value="0.90" selected>90%</option>
+            <option value="0.85">85%</option>
+            <option value="0.80">80%</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="courses"></div>
+
+      <div style="margin-top:22px; display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="action" id="run">Forecast my exam →</button>
+        <button class="action ghost" id="addcourse">Add a subject</button>
+      </div>
+      <p class="note">1 = gone · 2 = shaky · 3 = solid · 4 = cold. Each subject is treated as
+        <span id="percourse">75</span> recallable facts.</p>
+    </div>
+  </section>
+
+  <!-- ================= 2. FORECAST ================= -->
+  <section class="screen" id="screen-forecast">
+    <div class="card">
+      <div class="hero">
+        <div class="fig num" id="heroPct">—</div>
+        <div class="cap" id="heroCap">Run the forecast to see what survives to exam morning.</div>
+      </div>
+      <div class="stats" id="forecastStats"></div>
+    </div>
+
+    <div class="grid two" style="margin-top:18px">
+      <div class="card">
+        <h2 class="title">Everything you know, decaying toward the exam</h2>
+        <p class="sub">Your weakest subject is drawn in full colour. The rest are context.</p>
+        <ul class="legend" id="decayLegend"></ul>
+        <figure><div id="decayChart" class="loading">—</div>
+          <figcaption id="decayCaption"></figcaption></figure>
+      </div>
+      <div class="card">
+        <h2 class="title">Where the loss is</h2>
+        <p class="sub">Ranked worst first. This is where a minute buys the most.</p>
+        <figure><div id="conceptChart" class="loading">—</div></figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 3. DEADLINE ================= -->
+  <section class="screen" id="screen-deadline">
+    <div class="card">
+      <h2 class="title">The last day you can still start</h2>
+      <p class="sub">For every possible start day, Ebb studies as hard as is physically possible
+        from that day on — every night filled to your limit, always the weakest card — and reports
+        the best exam-day retention still reachable. Where that curve crosses your target is a
+        real deadline, and it is not the exam.</p>
+      <figure><div id="ceilingChart" class="loading">—</div>
+        <figcaption id="ceilingCaption"></figcaption></figure>
+      <div id="verdict"></div>
+    </div>
+
+    <div class="card">
+      <h2 class="title">The cheapest way there</h2>
+      <p class="sub">The smallest schedule that reaches your target, found by repeatedly taking the
+        single review that buys the most exam-day retention per minute.</p>
+      <div class="stats" id="planStats"></div>
+      <figure style="margin-top:20px"><div id="planChart" class="loading">—</div>
+        <figcaption id="planCaption"></figcaption></figure>
+    </div>
+  </section>
+
+  <!-- ================= 4. PROOF ================= -->
+  <section class="screen" id="screen-proof">
+    <div class="card">
+      <h2 class="title">Scored on reviews it had never seen</h2>
+      <p class="sub">Ebb's memory model is trained on real Anki review logs and graded on each
+        learner's <em>future</em> — every review after a wall-clock cutoff. These are the three
+        metrics the community spaced-repetition benchmark reports.</p>
+      <div class="stats" id="proofStats"></div>
+      <div class="scroll" style="margin-top:22px"><div id="proofTable" class="loading">—</div></div>
+      <p class="note" id="proofNote"></p>
+    </div>
+    <div class="card">
+      <h2 class="title">What we got wrong on the way here</h2>
+      <div id="findings"></div>
+    </div>
+  </section>
+
+</div>
+<div class="tip" id="tip"></div>
+<script src="/app.js"></script>
+</body>
+</html>
