@@ -17,7 +17,7 @@ import hashlib
 from pathlib import Path
 from typing import Iterator
 
-from ebb.model.features import Instance, instance_from_row
+from cutoff.model.features import Instance, instance_from_row
 
 DEFAULT_PATH = Path(__file__).resolve().parents[2] / "data" / "raw" / "learning_traces.13m.csv.gz"
 

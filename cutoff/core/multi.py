@@ -21,8 +21,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ebb.core.forecast import CardState, review_outcome
-from ebb.model.dsr import _next_difficulty, _next_stability, retrievability
+from cutoff.core.forecast import CardState, review_outcome
+from cutoff.model.dsr import _next_difficulty, _next_stability, retrievability
 
 
 @dataclass

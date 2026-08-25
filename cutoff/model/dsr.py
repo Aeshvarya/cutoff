@@ -1,4 +1,4 @@
-"""Ebb's memory model: Difficulty, Stability, Retrievability.
+"""Cutoff's memory model: Difficulty, Stability, Retrievability.
 
 Half-life regression treats memory as one number that grows with practice. That
 is not enough, and the community benchmark shows it: HLR scores a log loss of
@@ -16,7 +16,7 @@ and the forgetting curve is a power law rather than an exponential:
 
 F is derived, not fitted, so that R(S, S) == 0.9 exactly. That makes stability
 mean something concrete instead of being an arbitrary scale, which matters
-because Ebb reports stability to users.
+because Cutoff reports stability to users.
 
 After each review, difficulty drifts toward or away from easy depending on the
 grade, and stability jumps by an amount that shrinks as the card gets stronger

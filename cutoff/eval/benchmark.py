@@ -62,7 +62,7 @@ def rmse_bins(p: np.ndarray, y: np.ndarray, intervals: np.ndarray,
     """Calibration error, weighted by bin size.
 
     Log loss punishes confident mistakes; this asks a different question -- when
-    Ebb says "85%", does 85% of that group actually recall? That is the property
+    Cutoff says "85%", does 85% of that group actually recall? That is the property
     a forecast has to have, so it is the number that matters most for us.
     """
     def bucket(values, edges):

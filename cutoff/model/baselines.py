@@ -1,4 +1,4 @@
-"""Baselines that Ebb has to beat.
+"""Baselines that Cutoff has to beat.
 
 These are the comparison set from Settles & Meeder (2016) section 4.1. If our
 trained model cannot beat a 1960s index-card heuristic on real learner data,
@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 
-from ebb.model.features import MAX_HALF_LIFE, MAX_P, MIN_HALF_LIFE, MIN_P, clamp
+from cutoff.model.features import MAX_HALF_LIFE, MAX_P, MIN_HALF_LIFE, MIN_P, clamp
 
 
 def _feature(features, name: str, default: float = 0.0) -> float:

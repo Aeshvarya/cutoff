@@ -1,4 +1,4 @@
-"""Ebb's HTTP surface.
+"""Cutoff's HTTP surface.
 
 Deliberately stateless: the client holds its own cards and posts them with each
 request. No database, nothing to migrate, and nothing to lose when a free-tier
@@ -19,10 +19,10 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from ebb.core.forecast import CardState, review_outcome
-from ebb.core.multi import dominated, frontier
-from ebb.core.planner import plan
-from ebb.model.dsr import DSRModel
+from cutoff.core.forecast import CardState, review_outcome
+from cutoff.core.multi import dominated, frontier
+from cutoff.core.planner import plan
+from cutoff.model.dsr import DSRModel
 
 ROOT = Path(__file__).resolve().parents[2]
 ARTIFACTS = ROOT / "artifacts"
@@ -31,7 +31,7 @@ WEB = ROOT / "web"   # hand-written, no build step
 MODEL = DSRModel.load(ARTIFACTS / "dsr.json") if (ARTIFACTS / "dsr.json").exists() else DSRModel()
 W = MODEL.parameters
 
-app = FastAPI(title="Ebb", description="Exam-day retention forecasting")
+app = FastAPI(title="Cutoff", description="Exam-day retention forecasting")
 
 
 # --------------------------------------------------------------------------

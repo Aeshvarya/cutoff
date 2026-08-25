@@ -1,4 +1,4 @@
-"""Properties that must hold, or Ebb is lying to a student about their exam.
+"""Properties that must hold, or Cutoff is lying to a student about their exam.
 
 These are not coverage tests. Each one encodes a claim the product makes out
 loud, so that if the model drifts, the claim breaks loudly here instead of
@@ -17,11 +17,11 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from ebb.core.forecast import CardState, project, recall_at, review_outcome, state_on
-from ebb.core.planner import compare_to_cramming, plan
-from ebb.model.dsr import INITIAL_PARAMETERS as W
-from ebb.model.dsr import retrievability
-from ebb.model.features import observed_half_life
+from cutoff.core.forecast import CardState, project, recall_at, review_outcome, state_on
+from cutoff.core.planner import compare_to_cramming, plan
+from cutoff.model.dsr import INITIAL_PARAMETERS as W
+from cutoff.model.dsr import retrievability
+from cutoff.model.features import observed_half_life
 
 EXAM = 60
 
@@ -32,7 +32,7 @@ def a_card(stability=10.0, difficulty=5.0, last_review_day=0.0) -> CardState:
 
 def test_stability_is_the_ninety_percent_interval():
     """Stability is defined as the interval at which recall hits 90%. If this
-    drifts, every stability number Ebb displays becomes meaningless."""
+    drifts, every stability number Cutoff displays becomes meaningless."""
     for s in (1.0, 10.0, 100.0, 365.0):
         assert abs(retrievability(s, s, W[15]) - 0.9) < 1e-12
 
@@ -61,7 +61,7 @@ def test_a_review_never_hurts():
 
 def test_a_later_review_helps_more_for_a_fixed_deadline():
     """This is the uncomfortable one. Under a retrievability model, reviewing
-    closer to the exam is better for that exam. Ebb must not claim otherwise."""
+    closer to the exam is better for that exam. Cutoff must not claim otherwise."""
     card = a_card(stability=5.0, last_review_day=-10)
     early = review_outcome(card, 0, W).recall_on(EXAM, W)
     late = review_outcome(card, EXAM - 1, W).recall_on(EXAM, W)
@@ -135,7 +135,7 @@ def test_two_exam_frontier_is_a_real_trade_off():
     """Caring only about the first exam must beat caring only about the second
     AT the first exam, and lose at the second. If one weight won both, there
     would be no frontier and the feature would be theatre."""
-    from ebb.core.multi import plan_two_exams
+    from cutoff.core.multi import plan_two_exams
 
     cards = [a_card(stability=6.0, last_review_day=-6) for _ in range(40)]
     for i, c in enumerate(cards):

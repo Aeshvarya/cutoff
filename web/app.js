@@ -1,4 +1,4 @@
-/* Ebb — client.
+/* Cutoff — client.
    Charts are hand-drawn SVG. Every number on screen comes from the API, which
    computes it from the committed model. Nothing here is hardcoded for a demo. */
 
@@ -418,12 +418,12 @@ function renderCalibration(data) {
     const r = 3 + Math.sqrt(b.n) / 90;
     const dot = el("circle", { cx: X(b.predicted), cy: Y(b.actual), r: Math.min(r, 9),
       fill: css("--series-1"), stroke: css("--surface-1"), "stroke-width": 2 }, svg);
-    dot.addEventListener("mousemove", (e) => showTip(e, `Ebb said ${pct(b.predicted)}`,
+    dot.addEventListener("mousemove", (e) => showTip(e, `Cutoff said ${pct(b.predicted)}`,
       `${pct(b.actual)} actually recalled`, `${b.n.toLocaleString()} reviews`));
     dot.addEventListener("mouseleave", hideTip);
   }
   el("text", { x: box.x + box.w / 2, y: H - 6, "text-anchor": "middle", fill: css("--text-secondary"),
-    "font-size": 12, "font-family": css("--font") }, svg).textContent = "what Ebb predicted";
+    "font-size": 12, "font-family": css("--font") }, svg).textContent = "what Cutoff predicted";
   el("text", { x: -(box.y + box.h / 2), y: 14, transform: "rotate(-90)", "text-anchor": "middle",
     fill: css("--text-secondary"), "font-size": 12, "font-family": css("--font") }, svg)
     .textContent = "what actually happened";
@@ -436,7 +436,7 @@ function renderCalibration(data) {
       <td class="num">${pct(h.actual)}</td><td class="num" style="color:var(--warning)">+${((h.predicted - h.actual) * 100).toFixed(1)}</td></tr>`).join("")}
     </tbody></table>`;
   $("#calNote").innerHTML = `Expected calibration error <strong style="color:var(--text-primary)">${data.ece.toFixed(4)}</strong>.
-    Every gap is positive, so Ebb is consistently a little <em>over</em>confident — worst at the extremes,
+    Every gap is positive, so Cutoff is consistently a little <em>over</em>confident — worst at the extremes,
     where it says 45% and 30% recall. Its long-range accuracy is the point: three months out it is off by
     ${(data.by_horizon.length ? (data.by_horizon[data.by_horizon.length - 1].predicted - data.by_horizon[data.by_horizon.length - 1].actual) * 100 : 0).toFixed(1)} points, and forecasting months ahead is the entire premise.`;
 }
@@ -463,7 +463,7 @@ function renderProof(data) {
     <table>
       <thead><tr><th>model</th><th>log loss</th><th>calibration error</th><th>AUC</th></tr></thead>
       <tbody>
-        ${rows.map((r) => `<tr class="${r.name.startsWith("Ebb (DSR, fitted") ? "ours" : ""}">
+        ${rows.map((r) => `<tr class="${r.name.startsWith("Cutoff (DSR, fitted") ? "ours" : ""}">
           <td>${r.name}</td>${cell(r, "log_loss")}${cell(r, "rmse_bins")}${cell(r, "auc")}</tr>`).join("")}
       </tbody>
     </table>
@@ -480,7 +480,7 @@ function renderProof(data) {
       </tbody>
     </table>`;
 
-  const fitted = ours["Ebb (DSR, fitted)"], avg = ours["AVG (predict the mean)"];
+  const fitted = ours["Cutoff (DSR, fitted)"], avg = ours["AVG (predict the mean)"];
   $("#proofStats").innerHTML = [
     ["reviews scored", fitted.n.toLocaleString(), "each learner's future"],
     ["calibration error", fitted.rmse_bins.toFixed(4), "when it says 85%, 85% recall"],

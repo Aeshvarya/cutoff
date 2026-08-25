@@ -21,7 +21,7 @@ import math
 from collections import defaultdict
 from pathlib import Path
 
-from ebb.model.features import (
+from cutoff.model.features import (
     MAX_HALF_LIFE,
     MIN_HALF_LIFE,
     MAX_P,

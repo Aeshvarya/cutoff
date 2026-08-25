@@ -1,4 +1,4 @@
-"""Train Ebb's recall model and score it against the baselines.
+"""Train Cutoff's recall model and score it against the baselines.
 
     python scripts/train.py --train 1000000 --test 200000
 
@@ -20,11 +20,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from ebb.eval.metrics import evaluate                      # noqa: E402
-from ebb.model.baselines import ConstantHalfLife, Leitner, LogisticRecall, Pimsleur  # noqa: E402
-from ebb.model.dataset import DEFAULT_PATH, _user_bucket    # noqa: E402
-from ebb.model.features import instance_from_row            # noqa: E402
-from ebb.model.hlr import HalfLifeRegression                # noqa: E402
+from cutoff.eval.metrics import evaluate                      # noqa: E402
+from cutoff.model.baselines import ConstantHalfLife, Leitner, LogisticRecall, Pimsleur  # noqa: E402
+from cutoff.model.dataset import DEFAULT_PATH, _user_bucket    # noqa: E402
+from cutoff.model.features import instance_from_row            # noqa: E402
+from cutoff.model.hlr import HalfLifeRegression                # noqa: E402
 
 
 def load(path: Path, n_train: int, n_test: int, holdout_buckets: int = 10):
@@ -76,7 +76,7 @@ def main() -> None:
     constant = ConstantHalfLife().fit(train)
 
     models = {
-        "Ebb (half-life regression)": hlr,
+        "Cutoff (half-life regression)": hlr,
         "Logistic regression": logistic,
         "Leitner (1972)": Leitner(),
         "Pimsleur (1967)": Pimsleur(),

@@ -1,13 +1,13 @@
 """What will you actually remember on exam day?
 
-Every spaced-repetition tool answers "what should I review today". Ebb answers a
+Every spaced-repetition tool answers "what should I review today". Cutoff answers a
 different question: given everything you have studied and a date in the future,
 what is the probability you still hold each concept on THAT MORNING -- and what
 does the whole syllabus average out to.
 
 Anki's FSRS reports average predicted retention for *today* and can simulate
 future *workload*. Neither it nor Duolingo projects a body of material to a fixed
-calendar date. That projection is what Ebb computes, and it is the only thing
+calendar date. That projection is what Cutoff computes, and it is the only thing
 here a language model has no part in.
 """
 
@@ -18,7 +18,7 @@ from datetime import date, timedelta
 
 import numpy as np
 
-from ebb.model.dsr import (
+from cutoff.model.dsr import (
     MAX_STABILITY,
     MIN_STABILITY,
     _next_difficulty,

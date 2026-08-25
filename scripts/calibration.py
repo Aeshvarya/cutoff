@@ -1,6 +1,6 @@
 """Is the forecast honest?
 
-A model can rank well and still lie about magnitude. Ebb tells a student a
+A model can rank well and still lie about magnitude. Cutoff tells a student a
 number -- "68% on exam morning" -- so the property that actually matters is
 calibration: of every card it calls 70%, roughly 70% should be recalled.
 
@@ -23,9 +23,9 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from ebb.eval.benchmark import flatten                      # noqa: E402
-from ebb.model import anki                                  # noqa: E402
-from ebb.model.dsr import DSRModel                          # noqa: E402
+from cutoff.eval.benchmark import flatten                      # noqa: E402
+from cutoff.model import anki                                  # noqa: E402
+from cutoff.model.dsr import DSRModel                          # noqa: E402
 
 
 def reliability(p: np.ndarray, y: np.ndarray, edges: np.ndarray) -> list[dict]:
@@ -75,7 +75,7 @@ def main() -> None:
     print(f"\nexpected calibration error: {ece:.4f}")
     print(f"base recall rate in the held-out set: {base_rate:.4f}")
 
-    # How far ahead does the forecast still hold up? This is the number Ebb's
+    # How far ahead does the forecast still hold up? This is the number Cutoff's
     # whole premise rests on -- it forecasts months out, not days.
     horizons = []
     for lo, hi, label in [(0, 7, "under a week"), (7, 30, "1-4 weeks"),

@@ -1,7 +1,7 @@
 """The smallest amount of studying that gets you to a target on exam day.
 
 Every other tool answers "what is due today". That question has no exam in it.
-Ebb asks the inverse: you want to hold 90% of this syllabus on 20 November, and
+Cutoff asks the inverse: you want to hold 90% of this syllabus on 20 November, and
 you would like to spend as few minutes as possible getting there -- which cards,
 on which days?
 
@@ -19,7 +19,7 @@ exam" without qualification is overselling.
 What makes the problem real is capacity. Nobody reviews eight hundred cards the
 night before an exam. Once each day holds only as many reviews as you will
 actually sit through, the cheapest way to reach a target on exam day stops being
-a pile at the end and becomes a schedule -- and that schedule is what Ebb sells.
+a pile at the end and becomes a schedule -- and that schedule is what Cutoff sells.
 
 Two further honest caveats, stated here because they belong in the code and not
 only in a slide:
@@ -40,8 +40,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ebb.core.forecast import CardState, review_outcome
-from ebb.model.dsr import _next_difficulty, _next_stability, retrievability
+from cutoff.core.forecast import CardState, review_outcome
+from cutoff.model.dsr import _next_difficulty, _next_stability, retrievability
 
 
 @dataclass

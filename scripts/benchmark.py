@@ -1,4 +1,4 @@
-"""Train Ebb's model and score it against HLR and the trivial baseline.
+"""Train Cutoff's model and score it against HLR and the trivial baseline.
 
     python scripts/benchmark.py --collections 20
 
@@ -19,11 +19,11 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from ebb.eval.benchmark import PUBLISHED, flatten, score          # noqa: E402
-from ebb.model import anki                                        # noqa: E402
-from ebb.model.dsr import DSRModel                                # noqa: E402
-from ebb.model.features import MAX_P, MIN_P, Instance, build_features, clamp, observed_half_life  # noqa: E402
-from ebb.model.hlr import HalfLifeRegression                      # noqa: E402
+from cutoff.eval.benchmark import PUBLISHED, flatten, score          # noqa: E402
+from cutoff.model import anki                                        # noqa: E402
+from cutoff.model.dsr import DSRModel                                # noqa: E402
+from cutoff.model.features import MAX_P, MIN_P, Instance, build_features, clamp, observed_half_life  # noqa: E402
+from cutoff.model.hlr import HalfLifeRegression                      # noqa: E402
 
 
 def hlr_instances(sequences):
@@ -97,7 +97,7 @@ def main() -> None:
         )
         print(f"  fitting on a {args.max_cards:,}-card subsample")
 
-    print("\nfitting Ebb's DSR model...")
+    print("\nfitting Cutoff's DSR model...")
     started = time.time()
     dsr = DSRModel().fit(fit_set, max_iterations=args.iterations)
     print(f"  fitted in {time.time() - started:.1f}s")
@@ -106,15 +106,15 @@ def main() -> None:
     hlr = HalfLifeRegression(warm_start_half_life=30.0).fit(list(hlr_instances(fit_set)), log_every=0)
 
     results = {}
-    results["Ebb (DSR, fitted)"] = score(test, dsr.predict(test))
-    results["Ebb (DSR, unfitted defaults)"] = score(test, DSRModel().predict(test))
+    results["Cutoff (DSR, fitted)"] = score(test, dsr.predict(test))
+    results["Cutoff (DSR, unfitted defaults)"] = score(test, DSRModel().predict(test))
     results["HLR (ACL 2016, ours)"] = score(test, predict_with(hlr, test))
 
     p, y, *_ = flatten(test, np.zeros_like(test.gaps))
     base_rate = float(flatten(train, np.zeros_like(train.gaps))[1].mean())
     results["AVG (predict the mean)"] = score(test, np.full_like(test.gaps, base_rate))
 
-    print(f"\nscored on {results['Ebb (DSR, fitted)']['n']:,} held-out future reviews")
+    print(f"\nscored on {results['Cutoff (DSR, fitted)']['n']:,} held-out future reviews")
     print(f"base recall rate in training data: {base_rate:.4f}\n")
     header = f"{'model':<30}{'log loss':>10}{'RMSE(bins)':>12}{'AUC':>8}"
     print(header); print("-" * len(header))
