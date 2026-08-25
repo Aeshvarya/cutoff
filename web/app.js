@@ -334,6 +334,169 @@ function renderPlan(plan, daysToExam) {
   }
 }
 
+/* ------------------------------------------------------------- the dashboard */
+function sparkline(points, host, colour) {
+  const W = 180, H = 34;
+  const svg = svgRoot(host, W, H);
+  const ys = points.map((p) => p.recall);
+  const lo = Math.min(...ys, 0), hi = 1;
+  const X = (i) => (i / (points.length - 1)) * W;
+  const Y = (v) => H - 3 - ((v - lo) / (hi - lo)) * (H - 6);
+  el("path", { d: line(points.map((p, i) => [X(i), Y(p.recall)])), fill: "none",
+    stroke: colour, "stroke-width": 2, "stroke-linecap": "round" }, svg);
+  el("circle", { cx: X(points.length - 1), cy: Y(ys[ys.length - 1]), r: 3, fill: colour }, svg);
+}
+
+/** Traffic light for a subject. Reserved status colours, always with a word next
+    to them -- colour alone never carries the meaning. */
+function health(recall, target) {
+  if (recall >= target) return { colour: css("--good"), word: "fine" };
+  if (recall >= target - 0.15) return { colour: css("--warning"), word: "slipping" };
+  return { colour: css("--critical"), word: "needs you" };
+}
+
+function renderDashboard(forecast, ceiling, plan, curves, days, target) {
+  const dl = ceiling.latest_start_day;
+  const weakest = forecast.per_concept[0];
+  const gone = dl === null;
+  const waitDays = gone ? 0 : dl;
+
+  $("#bigRow").innerHTML = `
+    <div class="bigcard">
+      <div class="k">If you did nothing more</div>
+      <div class="v num" id="dashHero">—</div>
+      <div class="s">is how much of your syllabus you'd still have on exam morning,
+        <strong style="color:var(--text-primary)">${days} days</strong> from today.</div>
+    </div>
+    <div class="bigcard ${gone || waitDays < days * 0.25 ? "alarm" : "fine"}">
+      <div class="k">${gone ? "Your target is gone" : "You can still wait"}</div>
+      <div class="v num">${gone ? "0" : waitDays}<span style="font-size:22px;font-weight:500;letter-spacing:0"> days</span></div>
+      <div class="s">${gone
+        ? `Even starting tonight and working every night, you'd top out at
+           ${pct(ceiling.ceiling_if_you_start_today)}.`
+        : `After day ${dl} you can no longer reach ${pct0(target)} — not with any amount of work.`}</div>
+    </div>
+    <div class="bigcard">
+      <div class="k">Weakest subject</div>
+      <div class="v" style="font-size:34px;line-height:1.15">${weakest.concept}</div>
+      <div class="s">You'd have <strong style="color:var(--text-primary)">${pct0(weakest.recall)}</strong>
+        of it left. That's where an hour is worth the most.</div>
+    </div>`;
+  countUp($("#dashHero"), forecast.overall_recall, (v) => Math.round(v * 100) + "%");
+
+  // One line: the whole syllabus, slipping.
+  const host = $("#homeChart");
+  const W = 620, H = 400, box = { x: 44, y: 16, w: W - 60, h: H - 52, min: 0, max: 1 };
+  const svg = svgRoot(host, W, H);
+  grid(svg, box, [0, 0.25, 0.5, 0.75, 1], (t) => Math.round(t * 100) + "%");
+  const X = (d) => box.x + (d / days) * box.w;
+  const Y = (r) => box.y + box.h - r * box.h;
+
+  const overall = curves.series[0].points.map((_, i) => ({
+    day: curves.series[0].points[i].day,
+    recall: curves.series.reduce((a, sr) => a + sr.points[i].recall, 0) / curves.series.length,
+  }));
+
+  el("path", { d: line(overall.map((p) => [X(p.day), Y(p.recall)])) + ` L${X(days)},${Y(0)} L${X(0)},${Y(0)} Z`,
+    fill: css("--series-1"), opacity: 0.10 }, svg);
+  animate(el("path", { d: line(overall.map((p) => [X(p.day), Y(p.recall)])), fill: "none",
+    stroke: css("--series-1"), "stroke-width": 2.5, "stroke-linecap": "round" }, svg));
+
+  if (!gone) {
+    el("line", { x1: X(dl), x2: X(dl), y1: box.y, y2: box.y + box.h, stroke: css("--warning"),
+      "stroke-width": 2, opacity: .85 }, svg);
+    el("text", { x: X(dl) - 8, y: box.y + 13, "text-anchor": "end", fill: css("--warning"),
+      "font-size": 11.5, "font-weight": 640, "font-family": css("--font") }, svg)
+      .textContent = "your cutoff";
+  }
+  el("line", { x1: X(days), x2: X(days), y1: box.y - 6, y2: box.y + box.h,
+    stroke: css("--critical"), "stroke-width": 2 }, svg);
+  el("text", { x: X(days), y: box.y - 12, "text-anchor": "end", fill: css("--critical"),
+    "font-size": 11, "font-weight": 600, "letter-spacing": ".06em", "font-family": css("--font") }, svg)
+    .textContent = "EXAM";
+  el("line", { x1: box.x, x2: box.x + box.w, y1: box.y + box.h, y2: box.y + box.h,
+    stroke: css("--border-strong"), "stroke-width": 1 }, svg);
+  for (const d of [0, Math.round(days / 3), Math.round(days * 2 / 3)]) {
+    el("text", { x: X(d), y: box.y + box.h + 20, "text-anchor": d === 0 ? "start" : "middle",
+      fill: css("--text-muted"), "font-size": 11, "font-family": css("--font") }, svg)
+      .textContent = d === 0 ? "today" : `in ${d} days`;
+  }
+
+  $("#homeLegend").innerHTML =
+    `<li><span class="swatch" style="background:${css("--series-1")}"></span>everything you know</li>` +
+    (gone ? "" : `<li><span class="swatch" style="background:${css("--warning")}"></span>your cutoff — day ${dl}</li>`) +
+    `<li><span class="swatch" style="background:${css("--critical")}"></span>exam day</li>`;
+
+  // What to do today.
+  const first = plan.sessions[0];
+  const items = [];
+  items.push(gone
+    ? ["!", "Lower your target, or accept the ceiling.",
+       `${pct0(target)} can't be reached any more. Starting tonight and going flat out gets you
+        ${pct(ceiling.ceiling_if_you_start_today)}. That's the honest number.`, true]
+    : waitDays <= 3
+    ? ["!", "Start tonight.", `Your cutoff is day ${dl}. That's basically now.`, true]
+    : ["1", `Start by day ${dl}. Not before, not after.`,
+       `Revising earlier than that mostly fades before the exam. Later and you run out of
+        nights. Put it in your calendar today so you don't have to remember.`, false]);
+  if (first) {
+    items.push(["2", `Your first session is ${first.cards} facts, about ${Math.round(first.minutes)} minutes.`,
+      `Mostly ${first.concepts.slice(0, 2).join(" and ")}. Not a whole evening — one sitting.`, false]);
+  }
+  items.push(["3", `Fix ${weakest.concept} first.`,
+    `It's your weakest at ${pct0(weakest.recall)}, so every minute there is worth more than
+     a minute anywhere else.`, false]);
+  items.push(["4", `The whole plan is ${Math.round(plan.total_minutes)} minutes.`,
+    `Spread over ${plan.sessions.length} days, that takes you from ${pct0(plan.recall_before)}
+     to ${pct0(plan.recall_after)}. That is the entire ask.`, false]);
+
+  $("#todo").innerHTML = items.map(([n, t, d, hot]) =>
+    `<div class="todo ${hot ? "hot" : ""}"><div class="badge">${n}</div>
+      <div><div class="tt">${t}</div><div class="td">${d}</div></div></div>`).join("");
+
+  // Subject cards.
+  $("#subjectCards").innerHTML = forecast.per_concept.map((c, i) => {
+    const h = health(c.recall, target);
+    return `<div class="subj"><div class="nm">${c.concept}</div>
+      <div class="pc num" style="color:${h.colour}">${pct0(c.recall)}</div>
+      <div class="st">left on exam day · ${h.word}</div>
+      <div class="spark" id="spark-${i}"></div></div>`;
+  }).join("");
+  forecast.per_concept.forEach((c, i) => {
+    const series = curves.series.find((sr) => sr.concept === c.concept);
+    if (series) sparkline(series.points, $(`#spark-${i}`), health(c.recall, target).colour);
+  });
+}
+
+/* ------------------------------------------------- the explainer curve */
+function renderExplainCurve() {
+  const host = $("#explainCurve");
+  if (!host) return;
+  const W = 520, H = 210, box = { x: 44, y: 14, w: W - 62, h: H - 52, min: 0.4, max: 1 };
+  const svg = svgRoot(host, W, H);
+  grid(svg, box, [0.4, 0.6, 0.8, 1], (t) => Math.round(t * 100) + "%");
+  const DAYS = 60;
+  const X = (d) => box.x + (d / DAYS) * box.w;
+  const Y = (r) => box.y + box.h - (r - box.min) / (box.max - box.min) * box.h;
+  const decay = (t, S) => Math.pow(1 + (Math.pow(0.9, -1 / 0.5) - 1) * t / S, -0.5);
+
+  for (const [S, colour, label] of [[4, css("--series-2"), "barely learned"],
+                                    [45, css("--series-1"), "properly stuck"]]) {
+    const pts = Array.from({ length: 60 }, (_, i) => [X(i), Y(decay(i, S))]);
+    animate(el("path", { d: line(pts), fill: "none", stroke: colour, "stroke-width": 2.5,
+      "stroke-linecap": "round" }, svg));
+    el("text", { x: X(DAYS) - 4, y: Y(decay(DAYS - 1, S)) - 9, "text-anchor": "end", fill: colour,
+      "font-size": 12, "font-weight": 620, "font-family": css("--font") }, svg).textContent = label;
+  }
+  el("line", { x1: box.x, x2: box.x + box.w, y1: box.y + box.h, y2: box.y + box.h,
+    stroke: css("--border-strong"), "stroke-width": 1 }, svg);
+  for (const d of [0, 30, 59]) {
+    el("text", { x: X(d), y: box.y + box.h + 20, "text-anchor": d === 0 ? "start" : "middle",
+      fill: css("--text-muted"), "font-size": 11, "font-family": css("--font") }, svg)
+      .textContent = d === 0 ? "today" : `${d + 1} days later`;
+  }
+}
+
 /* -------------------------------------------------- 5. the two-exam frontier */
 function renderFrontier(data) {
   const host = $("#frontierChart");
@@ -446,7 +609,14 @@ function renderProof(data) {
   const host = $("#proofTable");
   const ours = data.ours, published = data.published;
   const rows = [];
-  for (const [name, s] of Object.entries(ours)) rows.push({ name, ...s, mine: true });
+  const PLAIN = {
+    "Cutoff (DSR, fitted)": "Cutoff, after learning from real data",
+    "Cutoff (DSR, unfitted defaults)": "Cutoff, before it learned anything",
+    "HLR (ACL 2016, ours)": "A well-known 2016 model, built by us",
+    "AVG (predict the mean)": "Just guessing the average every time",
+  };
+  for (const [name, s] of Object.entries(ours))
+    rows.push({ name: PLAIN[name] || name, key: name, ...s, mine: true });
 
   const fmt = (v, d = 4) => (v === null || v === undefined || Number.isNaN(v) ? "—" : v.toFixed(d));
   const best = { log_loss: Math.min(...rows.map((r) => r.log_loss)),
@@ -461,9 +631,12 @@ function renderProof(data) {
   host.classList.remove("loading");
   host.innerHTML = `
     <table>
-      <thead><tr><th>model</th><th>log loss</th><th>calibration error</th><th>AUC</th></tr></thead>
+      <thead><tr><th>what we tested</th>
+        <th>how wrong it is<br><span class="tech">log loss · lower is better</span></th>
+        <th>how honest it is<br><span class="tech">calibration · lower is better</span></th>
+        <th>can it tell them apart?<br><span class="tech">AUC · 0.50 is a coin flip</span></th></tr></thead>
       <tbody>
-        ${rows.map((r) => `<tr class="${r.name.startsWith("Cutoff (DSR, fitted") ? "ours" : ""}">
+        ${rows.map((r) => `<tr class="${r.key && r.key.startsWith("Cutoff (DSR, fitted") ? "ours" : ""}">
           <td>${r.name}</td>${cell(r, "log_loss")}${cell(r, "rmse_bins")}${cell(r, "auc")}</tr>`).join("")}
       </tbody>
     </table>
@@ -472,7 +645,8 @@ function renderProof(data) {
       ${data.collections}-collection sample, so read the ordering, not the decimals.
       These are not our numbers and we do not claim to have beaten them.</p>
     <table>
-      <thead><tr><th>published benchmark</th><th>log loss</th><th>calibration error</th><th>AUC</th></tr></thead>
+      <thead><tr><th>published results, for context</th>
+        <th class="tech">log loss</th><th class="tech">calibration</th><th class="tech">AUC</th></tr></thead>
       <tbody>${Object.entries(published).map(([n, s]) =>
         `<tr><td style="color:var(--text-muted)">${n}</td><td class="num" style="color:var(--text-muted)">${fmt(s.log_loss)}</td>
         <td class="num" style="color:var(--text-muted)">${fmt(s.rmse_bins)}</td>
@@ -482,16 +656,19 @@ function renderProof(data) {
 
   const fitted = ours["Cutoff (DSR, fitted)"], avg = ours["AVG (predict the mean)"];
   $("#proofStats").innerHTML = [
-    ["reviews scored", fitted.n.toLocaleString(), "each learner's future"],
-    ["calibration error", fitted.rmse_bins.toFixed(4), "when it says 85%, 85% recall"],
-    ["AUC", fitted.auc.toFixed(4), `a coin flip is ${avg.auc.toFixed(2)}`],
-    ["collections", String(data.collections), "real Anki users"],
+    ["answers we tested it on", fitted.n.toLocaleString(), "none of which it had seen"],
+    ["real people", String(data.collections), "their actual study records"],
+    ["how honest", fitted.rmse_bins.toFixed(3), "say 85%, and about 85% happen"],
+    ["beats guessing by", `${((fitted.auc - 0.5) * 200).toFixed(0)}%`, "on telling remembered from forgotten"],
   ].map(([k, v, s]) => `<div class="stat"><div class="k">${k}</div><div class="v num">${v}</div>
       <div class="k" style="text-transform:none;letter-spacing:0;font-weight:400;margin-top:3px">${s}</div></div>`).join("");
 
-  $("#proofNote").textContent =
-    "Trained on one wall-clock cutoff per collection: everything before it trains, everything after is scored. " +
-    "Splitting per card instead quietly selects for maturity — a card's last reviews are its easiest — and inflated held-out recall by three points when we tried it.";
+  $("#proofNote").innerHTML =
+    "<strong>Why this is a fair test.</strong> For each person we picked a date, let Cutoff learn " +
+    "only from before it, and scored it only on after. It never saw a single answer it was asked " +
+    "to predict. We first tried splitting each flashcard separately instead — that quietly made " +
+    "the test easier, because a card's last few reviews are its easiest ones, and it flattered " +
+    "the score by three points. So we threw that version out.";
 }
 
 const FINDINGS = [
@@ -589,15 +766,16 @@ async function run() {
 
     renderDecay(curves.series, days, forecast.weakest_concept);
     $("#decayCaption").textContent =
-      `Every line is a subject decaying from today to the exam. No language model computes any of this — it is the fitted memory model, run forward.`;
+      "Drawn by the memory model we trained, not by a chatbot. Hover anywhere to read off a day.";
     renderConcepts(forecast.per_concept);
 
     // --- deadline screen
+    renderDashboard(forecast, ceiling, plan, curves, days, target);
     renderCeiling(ceiling, days, target);
     const dl = ceiling.latest_start_day;
     $("#ceilingCaption").textContent =
-      `At ${cap} cards a night, working every remaining night at full effort. ` +
-      `The vertical scale starts at ${$("#ceilingChart").dataset.axisFloor}% so the drop is visible.`;
+      `Assumes ${cap} facts a night, every night, no days off — the absolute best case. ` +
+      `The scale starts at ${$("#ceilingChart").dataset.axisFloor}% so the drop is easy to see.`;
     const todayCeil = ceiling.ceiling_if_you_start_today;
     const lateCeil = ceiling.ceiling_if_you_wait_until_day;
     $("#verdict").innerHTML = dl === null
@@ -632,10 +810,10 @@ async function run() {
     ].map(([k, v]) => `<div class="stat"><div class="k">${k}</div><div class="v num">${v}</div></div>`).join("");
     renderPlan(plan, days);
     $("#planCaption").textContent = plan.target_met
-      ? `${Math.round(plan.total_minutes)} minutes, spread over ${plan.sessions.length} days, reaches ${pct(plan.recall_after)}.`
-      : `Even at the cap this schedule only reaches ${pct(plan.recall_after)} — the target is not reachable in the time left.`;
+      ? `Each bar is one evening. ${Math.round(plan.total_minutes)} minutes in total, across ${plan.sessions.length} days, gets you to ${pct(plan.recall_after)}.`
+      : `Each bar is one evening. Even working flat out this only reaches ${pct(plan.recall_after)} — there aren't enough nights left for your target.`;
 
-    const landing = wanted() === "syllabus" ? "forecast" : wanted();
+    const landing = wanted();
     showScreen(landing);
     if (landing === "twoexams") runFrontier();
   } catch (err) {
@@ -663,8 +841,9 @@ async function runFrontier() {
     });
     frontierPoints = renderFrontier(data);
     $("#frontierCaption").textContent =
-      `${data.budget.toLocaleString()} reviews — ${Math.round(data.minutes)} minutes — spent every possible way. ` +
-      `Points in grey are dominated: some other schedule beats them at both exams at once.`;
+      `Every dot is a real revision plan using the same ${Math.round(data.minutes)} minutes. ` +
+      `Up means better at mid-sems, right means better at end-sems — and you can't have both. ` +
+      `Grey dots are plans that lose at BOTH exams, so never pick one.`;
 
     const slider = $("#tradeoff");
     const update = () => {
@@ -705,7 +884,7 @@ $("#addcourse").addEventListener("click", () => {
   if (name) { state.courses.push({ name, rating: 3 }); renderCourses(); }
 });
 
-const SCREENS = ["syllabus", "forecast", "deadline", "twoexams", "proof"];
+const SCREENS = ["home", "syllabus", "forecast", "deadline", "twoexams", "howitworks", "proof"];
 const wanted = () => (SCREENS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "syllabus");
 
 (function init() {
@@ -722,6 +901,7 @@ const wanted = () => (SCREENS.includes(location.hash.slice(1)) ? location.hash.s
   });
   // Land on a populated page. Nobody should have to press a button to see
   // whether the thing works, least of all a judge with two minutes.
+  renderExplainCurve();
   showScreen(wanted());
   run();
   addEventListener("hashchange", () => showScreen(wanted()));

@@ -149,8 +149,10 @@ button.action.ghost { background: transparent; border: 1px solid var(--border-st
 table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 th, td { text-align: right; padding: 10px 12px; border-bottom: 1px solid var(--border); }
 th:first-child, td:first-child { text-align: left; }
-th { color: var(--text-muted); font-size: 11.5px; text-transform: uppercase;
-     letter-spacing: .06em; font-weight: 600; }
+th { color: var(--text-secondary); font-size: 12.5px; font-weight: 600; line-height: 1.35;
+     vertical-align: bottom; }
+.tech { color: var(--text-muted); font-size: 10.5px; font-weight: 500; text-transform: uppercase;
+        letter-spacing: .05em; }
 tr.ours td { background: rgba(57,135,229,.09); }
 tr.ours td:first-child { font-weight: 600; box-shadow: inset 2px 0 0 var(--series-1); }
 tbody tr:last-child td { border-bottom: 0; }
@@ -185,6 +187,50 @@ svg { display: block; width: 100%; height: auto; overflow: visible; }
 .pill .d { width: 6px; height: 6px; border-radius: 50%; }
 
 .loading { color: var(--text-muted); font-size: 13.5px; padding: 40px 0; text-align: center; }
+
+/* ---------- dashboard ---------- */
+.bigrow { display: grid; gap: 18px; grid-template-columns: 1fr; }
+@media (min-width: 780px) { .bigrow { grid-template-columns: repeat(3, 1fr); } }
+.bigcard { background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--r);
+           padding: var(--pad); display: flex; flex-direction: column; justify-content: space-between; }
+.bigcard .k { color: var(--text-muted); font-size: 11.5px; text-transform: uppercase;
+              letter-spacing: .07em; font-weight: 600; }
+.bigcard .v { font-size: clamp(44px, 7vw, 62px); font-weight: 640; letter-spacing: -0.045em;
+              line-height: 1; margin: 12px 0 8px; }
+.bigcard .s { color: var(--text-secondary); font-size: 13.5px; line-height: 1.5; }
+.bigcard.alarm { border-color: rgba(208,59,59,.5); }
+.bigcard.alarm .v { color: var(--critical); }
+.bigcard.fine .v { color: var(--good); }
+
+.subjects { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(215px,1fr)); }
+.subj { background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px; padding: 15px; }
+.subj .nm { font-size: 14px; font-weight: 560; margin-bottom: 3px; }
+.subj .pc { font-size: 30px; font-weight: 640; letter-spacing: -.035em; line-height: 1.05; }
+.subj .st { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+.subj .spark { margin-top: 10px; }
+
+.todo { border-bottom: 1px solid var(--border); padding: 15px 0; display: flex; gap: 13px; }
+.todo:last-child { border-bottom: 0; padding-bottom: 0; }
+.todo .badge { flex: 0 0 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+               font-size: 12.5px; font-weight: 700; background: var(--surface-2);
+               border: 1px solid var(--border-strong); color: var(--text-secondary); }
+.todo.hot .badge { background: var(--critical); border-color: var(--critical); color: #fff; }
+.todo .tt { font-weight: 560; font-size: 14.5px; }
+.todo .td { color: var(--text-secondary); font-size: 13px; margin-top: 2px; line-height: 1.5; }
+
+/* ---------- explainer ---------- */
+.steps { display: flex; flex-direction: column; gap: 34px; margin-top: 8px; }
+.step { display: grid; grid-template-columns: 42px 1fr; gap: 18px; align-items: start; }
+.step .n { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
+           background: var(--series-1); color: #fff; font-weight: 700; font-size: 15px; }
+.step h3 { font-size: 18px; font-weight: 600; letter-spacing: -.015em; margin: 4px 0 8px; }
+.step p { color: var(--text-secondary); font-size: 14.5px; line-height: 1.65; margin: 0 0 10px; max-width: 74ch; }
+.three { display: grid; gap: 1px; background: var(--border); border: 1px solid var(--border);
+         border-radius: var(--r); overflow: hidden; margin-top: 14px; }
+@media (min-width: 760px) { .three { grid-template-columns: repeat(3,1fr); } }
+.tcell { background: var(--surface-1); padding: 17px; }
+.tcell .k { font-weight: 600; font-size: 14.5px; margin-bottom: 6px; }
+.tcell p { font-size: 13.5px; margin: 0; }
 
 /* ---------- scrubbers ---------- */
 .scrub { margin: 22px 0 4px; }
@@ -225,33 +271,64 @@ svg { display: block; width: 100%; height: auto; overflow: visible; }
   </header>
 
   <nav class="tabs" role="tablist">
-    <button role="tab" data-screen="syllabus" aria-selected="true">1 · Your syllabus</button>
-    <button role="tab" data-screen="forecast" aria-selected="false">2 · The forecast</button>
-    <button role="tab" data-screen="deadline" aria-selected="false">3 · The deadline</button>
-    <button role="tab" data-screen="twoexams" aria-selected="false">4 · Two exams</button>
-    <button role="tab" data-screen="proof" aria-selected="false">5 · Does it actually work?</button>
+    <button role="tab" data-screen="home" aria-selected="true">Dashboard</button>
+    <button role="tab" data-screen="syllabus" aria-selected="false">My subjects</button>
+    <button role="tab" data-screen="forecast" aria-selected="false">What I'll forget</button>
+    <button role="tab" data-screen="deadline" aria-selected="false">My cutoff</button>
+    <button role="tab" data-screen="twoexams" aria-selected="false">Two exams</button>
+    <button role="tab" data-screen="howitworks" aria-selected="false">How it works</button>
+    <button role="tab" data-screen="proof" aria-selected="false">Can I trust it?</button>
   </nav>
 
+  <!-- ================= DASHBOARD ================= -->
+  <section class="screen active" id="screen-home">
+    <div class="bigrow" id="bigRow"></div>
+
+    <div class="grid two" style="margin-top:18px">
+      <div class="card">
+        <h2 class="title">How much you'll have left, day by day</h2>
+        <p class="sub">Right now you know almost everything you've studied. Every day that
+          passes without revising, a bit more slips. This is that slipping, drawn out to the
+          day of your exam.</p>
+        <ul class="legend" id="homeLegend"></ul>
+        <figure><div id="homeChart" class="loading">—</div></figure>
+      </div>
+
+      <div class="card">
+        <h2 class="title">What to do today</h2>
+        <p class="sub">The shortest useful answer we can give you.</p>
+        <div id="todo"></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:18px">
+      <h2 class="title">Every subject, weakest first</h2>
+      <p class="sub">Each card shows how much of that subject you'd still have on exam day,
+        and how fast it's slipping. Red means it needs you soon.</p>
+      <div class="subjects" id="subjectCards"></div>
+    </div>
+  </section>
+
   <!-- ================= 1. SYLLABUS ================= -->
-  <section class="screen active" id="screen-syllabus">
+  <section class="screen" id="screen-syllabus">
     <div class="card">
-      <h2 class="title">Grade yourself, once.</h2>
-      <p class="sub">You have no review history yet, so Cutoff has nothing to forecast from. This
-        self-test <em>is</em> your first review — the model turns each grade into a memory
-        stability the same way it would treat anyone's first look at a card. Nothing here is
-        invented for a demo.</p>
+      <h2 class="title">Tell it how well you know each subject</h2>
+      <p class="sub">Cutoff can't guess what's in your head, so start by being honest about
+        each subject. Tap a number: <strong>1</strong> if it's completely gone,
+        <strong>4</strong> if you could teach it. That's the only setup there is —
+        everything else on this site is worked out from these taps and today's date.</p>
 
       <div class="controls">
         <div class="field">
-          <label for="examdate">Exam date</label>
+          <label for="examdate">When is your exam?</label>
           <input type="date" id="examdate">
         </div>
         <div class="field">
-          <label for="cap">Cards you'll sit through a night</label>
+          <label for="cap">How many facts can you revise in one sitting?</label>
           <input type="number" id="cap" value="40" min="5" max="300" step="5">
         </div>
         <div class="field">
-          <label for="target">Target on exam day</label>
+          <label for="target">How much do you want to know on the day?</label>
           <select id="target">
             <option value="0.95">95%</option>
             <option value="0.90" selected>90%</option>
@@ -267,8 +344,10 @@ svg { display: block; width: 100%; height: auto; overflow: visible; }
         <button class="action" id="run">Forecast my exam →</button>
         <button class="action ghost" id="addcourse">Add a subject</button>
       </div>
-      <p class="note">1 = gone · 2 = shaky · 3 = solid · 4 = cold. Each subject is treated as
-        <span id="percourse">75</span> recallable facts.</p>
+      <p class="note"><strong>1</strong> = gone · <strong>2</strong> = shaky ·
+        <strong>3</strong> = solid · <strong>4</strong> = I could teach it.
+        Each subject is treated as <span id="percourse">75</span> separate facts you'd need to
+        recall in an exam.</p>
     </div>
   </section>
 
@@ -277,22 +356,25 @@ svg { display: block; width: 100%; height: auto; overflow: visible; }
     <div class="card">
       <div class="hero">
         <div class="fig num" id="heroPct">—</div>
-        <div class="cap" id="heroCap">Run the forecast to see what survives to exam morning.</div>
+        <div class="cap" id="heroCap">Set your subjects up first and this fills in.</div>
       </div>
       <div class="stats" id="forecastStats"></div>
     </div>
 
     <div class="grid two" style="margin-top:18px">
       <div class="card">
-        <h2 class="title">Everything you know, decaying toward the exam</h2>
-        <p class="sub">Your weakest subject is drawn in full colour. The rest are context.</p>
+        <h2 class="title">Everything slipping away, subject by subject</h2>
+        <p class="sub">Each line is one subject. It starts high — you know it now — and falls as
+          the weeks pass. Your worst subject is in orange so you can find it instantly.
+          The red line on the right is exam day.</p>
         <ul class="legend" id="decayLegend"></ul>
         <figure><div id="decayChart" class="loading">—</div>
           <figcaption id="decayCaption"></figcaption></figure>
       </div>
       <div class="card">
-        <h2 class="title">Where the loss is</h2>
-        <p class="sub">Ranked worst first. This is where a minute buys the most.</p>
+        <h2 class="title">Which subjects will hurt most</h2>
+        <p class="sub">How much of each you'd still have on exam morning. The short bars at
+          the top are where an hour of revision is worth the most.</p>
         <figure><div id="conceptChart" class="loading">—</div></figure>
       </div>
     </div>
@@ -302,15 +384,17 @@ svg { display: block; width: 100%; height: auto; overflow: visible; }
   <section class="screen" id="screen-deadline">
     <div class="card">
       <h2 class="title">The last day you can still start</h2>
-      <p class="sub">For every possible start day, Cutoff studies as hard as is physically possible
-        from that day on — every night filled to your limit, always the weakest card — and reports
-        the best exam-day retention still reachable. Where that curve crosses your target is a
-        real deadline, and it is not the exam.</p>
+      <p class="sub">Here's the idea. Pick any day and imagine you start revising then and work
+        flat out every single night until the exam — as hard as you physically can. How much
+        would you know on the day? That's the blue line.<br><br>
+        Start early and you're fine. Start late and there simply aren't enough nights left,
+        no matter how hard you work. <strong>The day the blue line drops below your target
+        is your cutoff</strong> — and it lands well before the exam.</p>
       <figure><div id="ceilingChart" class="loading">—</div>
         <figcaption id="ceilingCaption"></figcaption></figure>
 
       <div class="scrub">
-        <label for="startday">Drag to pick the day you start</label>
+        <label for="startday">Drag this: what if I start on…</label>
         <input type="range" id="startday" min="0" max="86" value="0">
         <div class="scrubout"><span id="scrubDay">today</span><span id="scrubVal">—</span></div>
       </div>
@@ -318,9 +402,10 @@ svg { display: block; width: 100%; height: auto; overflow: visible; }
     </div>
 
     <div class="card">
-      <h2 class="title">The cheapest way there</h2>
-      <p class="sub">The smallest schedule that reaches your target, found by repeatedly taking the
-        single review that buys the most exam-day retention per minute.</p>
+      <h2 class="title">The least work that still gets you there</h2>
+      <p class="sub">Cutoff picks revision sessions one at a time, always choosing the one that
+        adds the most to your exam-day score per minute spent. It stops the moment you hit
+        your target — so this is close to the smallest amount of work that works.</p>
       <div class="stats" id="planStats"></div>
       <figure style="margin-top:20px"><div id="planChart" class="loading">—</div>
         <figcaption id="planCaption"></figcaption></figure>
@@ -331,18 +416,18 @@ svg { display: block; width: 100%; height: auto; overflow: visible; }
   <section class="screen" id="screen-twoexams">
     <div class="card">
       <h2 class="title">You don't have one exam. You have two.</h2>
-      <p class="sub">Mid-sems in September, end-sems in November, and the same finite set of
-        nights in between. Revising for one costs you the other. Every published scheduler we
-        could find optimises unbounded retention, retention today, or the cost of remembering
-        something forever — none of them takes two calendar dates and a nightly limit. So the
-        honest answer is not a plan. It's a frontier.</p>
+      <p class="sub">Mid-sems in September, end-sems in November — and only so many free
+        evenings in between. Every hour you give to one is an hour the other doesn't get.<br><br>
+        So there is no single "best" plan. There's a <strong>trade</strong>. Drag the slider
+        and watch the two scores move in opposite directions. Every dot on the chart is a real
+        revision plan; you're choosing which one you want to live in.</p>
 
       <div class="controls">
-        <div class="field"><label for="exam1">First exam · day</label>
+        <div class="field"><label for="exam1">Mid-sems, days from now</label>
           <input type="number" id="exam1" value="20" min="2" max="200"></div>
-        <div class="field"><label for="exam2">Second exam · day</label>
+        <div class="field"><label for="exam2">End-sems, days from now</label>
           <input type="number" id="exam2" value="87" min="3" max="365"></div>
-        <div class="field"><label for="budget">Minutes you'll spend, total</label>
+        <div class="field"><label for="budget">Total minutes you'll revise, all term</label>
           <input type="number" id="budget" value="200" min="10" max="2000" step="10"></div>
         <button class="action" id="runFrontier">Compute the frontier</button>
       </div>
@@ -352,7 +437,7 @@ svg { display: block; width: 100%; height: auto; overflow: visible; }
           <figcaption id="frontierCaption"></figcaption></figure>
         <div>
           <div class="scrub">
-            <label for="tradeoff">Drag: who do you want to be good for?</label>
+            <label for="tradeoff">Drag this: which exam matters more to you?</label>
             <input type="range" id="tradeoff" min="0" max="100" value="50">
             <div class="scrubout"><span>end-sems</span><span>mid-sems</span></div>
           </div>
@@ -363,22 +448,90 @@ svg { display: block; width: 100%; height: auto; overflow: visible; }
     </div>
   </section>
 
+  <!-- ================= HOW IT WORKS ================= -->
+  <section class="screen" id="screen-howitworks">
+    <div class="card">
+      <h2 class="title">How any of this actually works</h2>
+      <p class="sub">No maths required. Three ideas, and then everything else on this site
+        follows from them.</p>
+
+      <div class="steps">
+        <div class="step">
+          <div class="n">1</div>
+          <div>
+            <h3>Forgetting isn't random. It has a shape.</h3>
+            <p>Learn something today and you'll be shaky on it in a week, worse in a month.
+              That fade follows a curve that's been measured since the 1880s. Because it has a
+              shape, it can be predicted — that's the whole reason Cutoff can exist.</p>
+            <figure><div id="explainCurve" class="loading">—</div>
+              <figcaption>Two facts. The steep one you barely know; the flat one is stuck.</figcaption></figure>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="n">2</div>
+          <div>
+            <h3>Every fact you know carries three numbers.</h3>
+            <p>This is the model, in full. There's nothing else in it.</p>
+            <div class="three">
+              <div class="tcell"><div class="k">How hard it is</div>
+                <p>Some facts stick after one look. Others you re-learn five times. Cutoff
+                  tracks this per fact and it barely changes.</p></div>
+              <div class="tcell"><div class="k">How well it's stuck</div>
+                <p>How many days until you're down to a coin-flip on it. Revising
+                  successfully pushes this up. Forgetting knocks it back down.</p></div>
+              <div class="tcell"><div class="k">Your chance right now</div>
+                <p>Given how stuck it is and how long since you looked — what are the odds you
+                  could produce it this second? This is what falls every day you do nothing.</p></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="n">3</div>
+          <div>
+            <h3>Revising late is worth more — until you run out of nights.</h3>
+            <p>For a single exam, revision done close to the day is worth more, simply because
+              there's less time left for it to fade. That's why cramming works, and we're not
+              going to pretend otherwise.</p>
+            <p><strong>But you can't revise 600 facts the night before.</strong> You get through
+              maybe forty in a sitting. So the nights themselves are the scarce thing — and
+              once you count them, there's a last day you can start and still finish in time.
+              That day is your cutoff, and almost nobody knows theirs.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="verdict ok" style="margin-top:6px">
+        <div class="big">Where the AI actually is</div>
+        <div class="small">Cutoff learned those three numbers, and exactly how they move after
+          every right and wrong answer, from <strong>half a million real study records</strong>.
+          Nobody typed the rules in. That learned model is what draws every line on this site —
+          and no chatbot is involved in any of it.</div>
+      </div>
+    </div>
+  </section>
+
   <!-- ================= 5. PROOF ================= -->
   <section class="screen" id="screen-proof">
     <div class="card">
-      <h2 class="title">Scored on reviews it had never seen</h2>
-      <p class="sub">Cutoff's memory model is trained on real Anki review logs and graded on each
-        learner's <em>future</em> — every review after a wall-clock cutoff. These are the three
-        metrics the community spaced-repetition benchmark reports.</p>
+      <h2 class="title">We tested it on half a million real answers</h2>
+      <p class="sub">A tool that predicts your memory is worthless if it's wrong, so here's the
+        check. We took the study records of 40 real people, showed Cutoff only the
+        <em>early</em> part of each person's history, and asked it to predict what they'd get
+        right <em>later</em> — answers it had never seen. Then we compared its predictions to
+        what actually happened.</p>
       <div class="stats" id="proofStats"></div>
       <div class="scroll" style="margin-top:22px"><div id="proofTable" class="loading">—</div></div>
       <p class="note" id="proofNote"></p>
     </div>
 
     <div class="card">
-      <h2 class="title">When it says 86%, do 86% actually recall?</h2>
-      <p class="sub">Ranking well is not the same as being honest about magnitude, and Cutoff shows
-        you a number. Perfect calibration puts every point on the diagonal.</p>
+      <h2 class="title">When it says "8 out of 10", do 8 out of 10 really happen?</h2>
+      <p class="sub">This is the test that matters most, because Cutoff shows you a number and
+        you're going to plan around it. Take every time it said "about 80% chance" and check
+        how many of those were actually remembered. <strong>If it's honest, the blue line sits
+        on the green one.</strong></p>
       <div class="grid two">
         <figure><div id="calChart" class="loading">—</div>
           <figcaption id="calCaption"></figcaption></figure>
@@ -387,7 +540,7 @@ svg { display: block; width: 100%; height: auto; overflow: visible; }
       </div>
     </div>
     <div class="card">
-      <h2 class="title">What we got wrong on the way here</h2>
+      <h2 class="title">Three things we were wrong about</h2>
       <div id="findings"></div>
     </div>
   </section>
