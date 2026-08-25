@@ -46,6 +46,41 @@ function hBarPath(x, y, w, h, r) {
   r = Math.min(r, h / 2, w);
   return `M${x},${y} L${x + w - r},${y} Q${x + w},${y} ${x + w},${y + r} L${x + w},${y + h - r} Q${x + w},${y + h} ${x + w - r},${y + h} L${x},${y + h} Z`;
 }
+/** Let a path draw itself in.
+    Fails OPEN: the dash offset is only applied once we know the transition will
+    clear it, so a path can never be left hidden by its own animation. */
+function animate(path) {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return path;
+  let length = 0;
+  try { length = path.getTotalLength(); } catch { return path; }
+  if (!length || !Number.isFinite(length)) return path;
+
+  path.style.strokeDasharray = length;
+  path.style.strokeDashoffset = length;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    path.style.transition = "stroke-dashoffset .85s cubic-bezier(.22,.61,.36,1)";
+    path.style.strokeDashoffset = "0";
+  }));
+  // Belt and braces: if the frames never arrive (a background tab, a headless
+  // renderer), clear it anyway so the line is simply there.
+  setTimeout(() => { path.style.strokeDashoffset = "0"; }, 1200);
+  return path;
+}
+
+/** Count a figure up to its value. Purely decorative, so it degrades to the
+    final number if anything goes wrong or motion is unwanted. */
+function countUp(node, value, format) {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) { node.textContent = format(value); return; }
+  const start = performance.now(), dur = 900;
+  const step = (now) => {
+    const t = Math.min(1, (now - start) / dur);
+    const eased = 1 - Math.pow(1 - t, 3);
+    node.textContent = format(value * eased);
+    if (t < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
 function line(points) {
   return points.map((p, i) => (i ? "L" : "M") + p[0].toFixed(2) + "," + p[1].toFixed(2)).join(" ");
 }
@@ -95,14 +130,14 @@ function renderDecay(series, daysToExam, weakest) {
   const ordered = [...series].sort((a, b) => (a.concept === weakest ? 1 : b.concept === weakest ? -1 : 0));
   for (const s of ordered) {
     const isWeak = s.concept === weakest;
-    el("path", {
+    animate(el("path", {
       d: line(s.points.map((p) => [X(p.day), Y(p.recall)])),
       fill: "none",
       stroke: isWeak ? css("--series-2") : css("--context"),
       "stroke-width": isWeak ? 2.5 : 1.5,
       "stroke-linecap": "round",
       opacity: isWeak ? 1 : 0.72,
-    }, svg);
+    }, svg));
   }
 
   // Direct-label the endpoint of the emphasised series only.
@@ -209,9 +244,21 @@ function renderCeiling(ceiling, daysToExam, target) {
     "font-weight": 600, "font-family": css("--font") }, svg)
     .textContent = `your target · ${pct0(target)}`;
 
-  el("path", { d: line(curve.map((p) => [X(p.start_day), Y(p.best_possible)])),
+  animate(el("path", { d: line(curve.map((p) => [X(p.start_day), Y(p.best_possible)])),
     fill: "none", stroke: css("--series-1"), "stroke-width": 2.5, "stroke-linejoin": "round",
-    "stroke-linecap": "round" }, svg);
+    "stroke-linecap": "round" }, svg));
+
+  // A marker the scrubber drives.
+  const liveDot = el("circle", { r: 6, fill: css("--series-1"), stroke: css("--surface-1"),
+    "stroke-width": 2.5, opacity: 0 }, svg);
+  host.moveMarker = (day) => {
+    const p = curve.reduce((a, b) => (Math.abs(b.start_day - day) < Math.abs(a.start_day - day) ? b : a));
+    liveDot.setAttribute("cx", X(p.start_day));
+    liveDot.setAttribute("cy", Y(p.best_possible));
+    liveDot.setAttribute("opacity", 1);
+    liveDot.setAttribute("fill", p.best_possible >= target ? css("--good") : css("--critical"));
+    return p;
+  };
 
   if (deadline !== null) {
     el("line", { x1: X(deadline), x2: X(deadline), y1: box.y, y2: box.y + box.h,
@@ -287,7 +334,114 @@ function renderPlan(plan, daysToExam) {
   }
 }
 
-/* ------------------------------------------------------ 5. the proof table */
+/* -------------------------------------------------- 5. the two-exam frontier */
+function renderFrontier(data) {
+  const host = $("#frontierChart");
+  const pts = data.points;
+  const W = 460, H = 380;
+  const xs = pts.map((p) => p.recall_second), ys = pts.map((p) => p.recall_first);
+  const pad = 0.03;
+  const xmin = Math.min(...xs) - pad, xmax = Math.max(...xs) + pad;
+  const ymin = Math.min(...ys) - pad, ymax = Math.max(...ys) + pad;
+  const box = { x: 56, y: 20, w: W - 76, h: H - 76 };
+  const svg = svgRoot(host, W, H);
+  const X = (v) => box.x + (v - xmin) / (xmax - xmin) * box.w;
+  const Y = (v) => box.y + box.h - (v - ymin) / (ymax - ymin) * box.h;
+
+  for (let i = 0; i <= 3; i++) {
+    const v = ymin + (ymax - ymin) * i / 3;
+    el("line", { x1: box.x, x2: box.x + box.w, y1: Y(v), y2: Y(v), stroke: css("--border"),
+      "stroke-width": 1 }, svg);
+    el("text", { x: box.x - 9, y: Y(v) + 4, "text-anchor": "end", fill: css("--text-muted"),
+      "font-size": 11, "font-family": css("--font") }, svg).textContent = Math.round(v * 100) + "%";
+    const h = xmin + (xmax - xmin) * i / 3;
+    el("text", { x: X(h), y: box.y + box.h + 20, "text-anchor": "middle", fill: css("--text-muted"),
+      "font-size": 11, "font-family": css("--font") }, svg).textContent = Math.round(h * 100) + "%";
+  }
+  el("text", { x: box.x + box.w / 2, y: H - 22, "text-anchor": "middle", fill: css("--text-secondary"),
+    "font-size": 12, "font-family": css("--font") }, svg).textContent = "what you hold at END-SEMS →";
+  el("text", { x: -(box.y + box.h / 2), y: 15, transform: "rotate(-90)", "text-anchor": "middle",
+    fill: css("--text-secondary"), "font-size": 12, "font-family": css("--font") }, svg)
+    .textContent = "what you hold at MID-SEMS →";
+
+  const live = pts.filter((p) => !p.dominated).sort((a, b) => a.recall_second - b.recall_second);
+  animate(el("path", { d: line(live.map((p) => [X(p.recall_second), Y(p.recall_first)])),
+    fill: "none", stroke: css("--series-1"), "stroke-width": 2, "stroke-linejoin": "round" }, svg));
+
+  for (const p of pts) {
+    const dot = el("circle", { cx: X(p.recall_second), cy: Y(p.recall_first), r: p.dominated ? 4 : 5.5,
+      fill: p.dominated ? css("--context") : css("--series-1"),
+      stroke: css("--surface-1"), "stroke-width": 2 }, svg);
+    dot.addEventListener("mousemove", (e) => showTip(e,
+      `${Math.round(p.weight * 100)}% of your effort on mid-sems`,
+      `${pct(p.recall_first)} / ${pct(p.recall_second)}`,
+      p.dominated ? "dominated — never pick this" : `${p.reviews_before_first} reviews before, ${p.reviews_after_first} after`));
+    dot.addEventListener("mouseleave", hideTip);
+  }
+
+  const liveDot = el("circle", { r: 8, fill: "none", stroke: css("--series-2"),
+    "stroke-width": 2.5, opacity: 0 }, svg);
+  host.moveMarker = (weight) => {
+    const p = pts.reduce((a, b) => (Math.abs(b.weight - weight) < Math.abs(a.weight - weight) ? b : a));
+    liveDot.setAttribute("cx", X(p.recall_second));
+    liveDot.setAttribute("cy", Y(p.recall_first));
+    liveDot.setAttribute("opacity", 1);
+    return p;
+  };
+  return pts;
+}
+
+/* ------------------------------------------------- 6. the reliability curve */
+function renderCalibration(data) {
+  const host = $("#calChart");
+  const W = 400, H = 380, box = { x: 50, y: 18, w: W - 70, h: H - 66 };
+  const svg = svgRoot(host, W, H);
+  const lo = 0.25;
+  const X = (v) => box.x + (v - lo) / (1 - lo) * box.w;
+  const Y = (v) => box.y + box.h - (v - lo) / (1 - lo) * box.h;
+
+  for (let v = 0.25; v <= 1.001; v += 0.25) {
+    el("line", { x1: box.x, x2: box.x + box.w, y1: Y(v), y2: Y(v), stroke: css("--border"), "stroke-width": 1 }, svg);
+    el("text", { x: box.x - 9, y: Y(v) + 4, "text-anchor": "end", fill: css("--text-muted"),
+      "font-size": 11, "font-family": css("--font") }, svg).textContent = Math.round(v * 100) + "%";
+    el("text", { x: X(v), y: box.y + box.h + 20, "text-anchor": "middle", fill: css("--text-muted"),
+      "font-size": 11, "font-family": css("--font") }, svg).textContent = Math.round(v * 100) + "%";
+  }
+  // Perfect calibration.
+  el("line", { x1: X(lo), y1: Y(lo), x2: X(1), y2: Y(1), stroke: css("--good"), "stroke-width": 1.5 }, svg);
+  el("text", { x: X(0.93), y: Y(0.99), "text-anchor": "end", fill: css("--good"), "font-size": 11,
+    "font-weight": 600, "font-family": css("--font") }, svg).textContent = "perfectly honest";
+
+  animate(el("path", { d: line(data.curve.map((b) => [X(b.predicted), Y(b.actual)])), fill: "none",
+    stroke: css("--series-1"), "stroke-width": 2.5, "stroke-linejoin": "round" }, svg));
+  for (const b of data.curve) {
+    const r = 3 + Math.sqrt(b.n) / 90;
+    const dot = el("circle", { cx: X(b.predicted), cy: Y(b.actual), r: Math.min(r, 9),
+      fill: css("--series-1"), stroke: css("--surface-1"), "stroke-width": 2 }, svg);
+    dot.addEventListener("mousemove", (e) => showTip(e, `Ebb said ${pct(b.predicted)}`,
+      `${pct(b.actual)} actually recalled`, `${b.n.toLocaleString()} reviews`));
+    dot.addEventListener("mouseleave", hideTip);
+  }
+  el("text", { x: box.x + box.w / 2, y: H - 6, "text-anchor": "middle", fill: css("--text-secondary"),
+    "font-size": 12, "font-family": css("--font") }, svg).textContent = "what Ebb predicted";
+  el("text", { x: -(box.y + box.h / 2), y: 14, transform: "rotate(-90)", "text-anchor": "middle",
+    fill: css("--text-secondary"), "font-size": 12, "font-family": css("--font") }, svg)
+    .textContent = "what actually happened";
+
+  $("#calCaption").textContent =
+    `${data.reviews.toLocaleString()} held-out reviews. Dot size is how many reviews fall in that bin.`;
+  $("#horizonTable").innerHTML = `<table><thead><tr><th>how far ahead</th><th>predicted</th>
+      <th>actual</th><th>gap</th></tr></thead><tbody>
+      ${data.by_horizon.map((h) => `<tr><td>${h.label}</td><td class="num">${pct(h.predicted)}</td>
+      <td class="num">${pct(h.actual)}</td><td class="num" style="color:var(--warning)">+${((h.predicted - h.actual) * 100).toFixed(1)}</td></tr>`).join("")}
+    </tbody></table>`;
+  $("#calNote").innerHTML = `Expected calibration error <strong style="color:var(--text-primary)">${data.ece.toFixed(4)}</strong>.
+    Every gap is positive, so Ebb is consistently a little <em>over</em>confident — worst at the extremes,
+    where it says 45% and 30% recall. Its long-range accuracy is the point: three months out it is off by
+    ${(data.by_horizon.length ? (data.by_horizon[data.by_horizon.length - 1].predicted - data.by_horizon[data.by_horizon.length - 1].actual) * 100 : 0).toFixed(1)} points, and forecasting months ahead is the entire premise.`;
+}
+
+/* ------------------------------------------------------ 7. the proof table */
 function renderProof(data) {
   const host = $("#proofTable");
   const ours = data.ours, published = data.published;
@@ -422,7 +576,7 @@ async function run() {
     state.forecast = forecast; state.ceiling = ceiling; state.plan = plan;
 
     // --- forecast screen
-    $("#heroPct").textContent = pct0(forecast.overall_recall);
+    countUp($("#heroPct"), forecast.overall_recall, (v) => Math.round(v * 100) + "%");
     $("#heroCap").innerHTML = `is what you'd still hold on exam morning, <strong style="color:var(--text-primary)">${days} days</strong> from today, if you did nothing between now and then.`;
     $("#forecastStats").innerHTML = [
       ["days to exam", days, ""],
@@ -453,6 +607,22 @@ async function run() {
          <div class="big">You have until day ${dl}.</div>
          <div class="small">Start then and ${pct0(target)} is still reachable. Wait until day ${lateCeil.day} and your ceiling is ${pct(lateCeil.best_possible)} — at maximum effort, and nothing closes it. The deadline is not the exam.</div></div>`;
 
+    // The scrubber: drag a start day and watch the ceiling move with it.
+    const scrub = $("#startday");
+    scrub.max = String(Math.max(1, days - 1));
+    const updateScrub = () => {
+      const day = +scrub.value;
+      const p = $("#ceilingChart").moveMarker ? $("#ceilingChart").moveMarker(day) : null;
+      if (!p) return;
+      $("#scrubDay").textContent = p.start_day === 0 ? "if you start today" : `if you start on day ${p.start_day}`;
+      const reachable = p.best_possible >= target;
+      $("#scrubVal").innerHTML = `<span style="color:${reachable ? css("--good") : css("--critical")}">` +
+        `${pct(p.best_possible)}${reachable ? "" : " — target gone"}</span>`;
+    };
+    scrub.oninput = updateScrub;
+    scrub.value = String(dl === null ? 0 : dl);
+    updateScrub();
+
     $("#planStats").innerHTML = [
       ["from", pct0(plan.recall_before)],
       ["to", pct0(plan.recall_after)],
@@ -465,7 +635,9 @@ async function run() {
       ? `${Math.round(plan.total_minutes)} minutes, spread over ${plan.sessions.length} days, reaches ${pct(plan.recall_after)}.`
       : `Even at the cap this schedule only reaches ${pct(plan.recall_after)} — the target is not reachable in the time left.`;
 
-    showScreen(wanted() === "syllabus" ? "forecast" : wanted());
+    const landing = wanted() === "syllabus" ? "forecast" : wanted();
+    showScreen(landing);
+    if (landing === "twoexams") runFrontier();
   } catch (err) {
     alert("Could not reach the model: " + err.message);
   } finally {
@@ -473,16 +645,67 @@ async function run() {
   }
 }
 
+/* -------------------------------------------------------- the two-exam run */
+let frontierPoints = null;
+
+async function runFrontier() {
+  if (!state.cards.length) { alert("Run the forecast first."); return; }
+  const first = +$("#exam1").value, second = +$("#exam2").value;
+  const budget = Math.round(+$("#budget").value / 0.5);
+  if (second <= first) { alert("The second exam has to come after the first."); return; }
+
+  const btn = $("#runFrontier"); btn.disabled = true; btn.textContent = "Computing…";
+  try {
+    const data = await api("/api/frontier", {
+      cards: state.cards, first_exam_day: first, second_exam_day: second,
+      budget, max_reviews_per_day: +$("#cap").value || 40,
+      weights: [0, 0.3, 0.42, 0.48, 0.52, 0.58, 0.7, 1.0],
+    });
+    frontierPoints = renderFrontier(data);
+    $("#frontierCaption").textContent =
+      `${data.budget.toLocaleString()} reviews — ${Math.round(data.minutes)} minutes — spent every possible way. ` +
+      `Points in grey are dominated: some other schedule beats them at both exams at once.`;
+
+    const slider = $("#tradeoff");
+    const update = () => {
+      const w = +slider.value / 100;
+      const p = $("#frontierChart").moveMarker(w);
+      $("#tradeGrid").innerHTML = `
+        <div class="tradecell"><div class="k">at mid-sems · day ${first}</div>
+          <div class="v num" style="color:var(--series-2)">${pct0(p.recall_first)}</div>
+          <div class="s">${p.reviews_before_first} reviews before it</div></div>
+        <div class="tradecell"><div class="k">at end-sems · day ${second}</div>
+          <div class="v num" style="color:var(--series-1)">${pct0(p.recall_second)}</div>
+          <div class="s">${p.reviews_after_first} reviews after</div></div>`;
+    };
+    slider.oninput = update;
+    update();
+
+    const best = data.points.reduce((a, b) => (b.recall_first > a.recall_first ? b : a));
+    const worst = data.points.reduce((a, b) => (b.recall_first < a.recall_first ? b : a));
+    $("#frontierVerdict").innerHTML = `<div class="verdict">
+      <div class="big">${pct0(best.recall_first)} then ${pct0(best.recall_second)} — or ${pct0(worst.recall_first)} then ${pct0(worst.recall_second)}.</div>
+      <div class="small">Identical nights. Identical effort. No schedule wins both, so this is a
+        choice you are making whether or not you know you are making it.</div></div>`;
+  } catch (err) {
+    alert("Could not compute the frontier: " + err.message);
+  } finally { btn.disabled = false; btn.textContent = "Compute the frontier"; }
+}
+$("#runFrontier").addEventListener("click", runFrontier);
+
 /* ------------------------------------------------------------------- boot */
 document.querySelectorAll("nav.tabs button").forEach((b) =>
-  b.addEventListener("click", () => showScreen(b.dataset.screen)));
+  b.addEventListener("click", () => {
+    showScreen(b.dataset.screen);
+    if (b.dataset.screen === "twoexams" && !frontierPoints && state.cards.length) runFrontier();
+  }));
 $("#run").addEventListener("click", run);
 $("#addcourse").addEventListener("click", () => {
   const name = prompt("Subject name?");
   if (name) { state.courses.push({ name, rating: 3 }); renderCourses(); }
 });
 
-const SCREENS = ["syllabus", "forecast", "deadline", "proof"];
+const SCREENS = ["syllabus", "forecast", "deadline", "twoexams", "proof"];
 const wanted = () => (SCREENS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "syllabus");
 
 (function init() {
@@ -493,6 +716,9 @@ const wanted = () => (SCREENS.includes(location.hash.slice(1)) ? location.hash.s
   renderFindings();
   api("/api/proof").then(renderProof).catch(() => {
     $("#proofTable").textContent = "Benchmark artifact not found — run scripts/benchmark.py.";
+  });
+  api("/api/calibration").then(renderCalibration).catch(() => {
+    $("#calChart").textContent = "Calibration artifact not found — run scripts/calibration.py.";
   });
   // Land on a populated page. Nobody should have to press a button to see
   // whether the thing works, least of all a judge with two minutes.

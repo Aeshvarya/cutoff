@@ -236,6 +236,7 @@ class FrontierRequest(BaseModel):
     second_exam_day: int = Field(gt=0)
     budget: int = Field(default=400, gt=0)
     max_reviews_per_day: int = Field(default=40, gt=0)
+    weights: list[float] | None = None
 
 
 @app.post("/api/frontier")
@@ -248,6 +249,7 @@ def two_exam_frontier(request: FrontierRequest) -> dict:
     points = frontier(
         cards, request.first_exam_day, request.second_exam_day, W,
         budget=request.budget, max_reviews_per_day=request.max_reviews_per_day,
+        weights=request.weights,
     )
     flags = dominated(points)
     return {
