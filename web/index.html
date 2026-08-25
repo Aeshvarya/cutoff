@@ -185,6 +185,35 @@ svg { display: block; width: 100%; height: auto; overflow: visible; }
 .pill .d { width: 6px; height: 6px; border-radius: 50%; }
 
 .loading { color: var(--text-muted); font-size: 13.5px; padding: 40px 0; text-align: center; }
+
+/* ---------- scrubbers ---------- */
+.scrub { margin: 22px 0 4px; }
+.scrub label { display: block; color: var(--text-muted); font-size: 11.5px; text-transform: uppercase;
+               letter-spacing: .07em; font-weight: 600; margin-bottom: 9px; }
+.scrub input[type=range] { width: 100%; appearance: none; height: 3px; border-radius: 2px;
+  background: var(--border-strong); outline: none; }
+.scrub input[type=range]::-webkit-slider-thumb { appearance: none; width: 18px; height: 18px;
+  border-radius: 50%; background: var(--series-1); cursor: grab; border: 3px solid var(--surface-1);
+  box-shadow: 0 0 0 1px var(--series-1); }
+.scrub input[type=range]:active::-webkit-slider-thumb { cursor: grabbing; transform: scale(1.12); }
+.scrubout { display: flex; justify-content: space-between; margin-top: 9px;
+            font-size: 13px; color: var(--text-secondary); }
+.scrubout span:last-child { font-weight: 620; color: var(--text-primary); }
+
+.tradegrid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border);
+             border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; margin-top: 22px; }
+.tradecell { background: var(--surface-1); padding: 17px; }
+.tradecell .k { color: var(--text-muted); font-size: 11.5px; text-transform: uppercase;
+                letter-spacing: .07em; font-weight: 600; }
+.tradecell .v { font-size: 38px; font-weight: 630; letter-spacing: -0.04em; margin-top: 5px; line-height: 1; }
+.tradecell .s { color: var(--text-muted); font-size: 12.5px; margin-top: 5px; }
+
+/* Curves draw themselves in. Motion is off for anyone who asked for it to be. */
+@media (prefers-reduced-motion: no-preference) {
+  path.draw { stroke-dasharray: var(--len); stroke-dashoffset: var(--len);
+              animation: draw .85s cubic-bezier(.22,.61,.36,1) forwards; }
+}
+@keyframes draw { to { stroke-dashoffset: 0; } }
 </style>
 </head>
 <body>
@@ -199,7 +228,8 @@ svg { display: block; width: 100%; height: auto; overflow: visible; }
     <button role="tab" data-screen="syllabus" aria-selected="true">1 · Your syllabus</button>
     <button role="tab" data-screen="forecast" aria-selected="false">2 · The forecast</button>
     <button role="tab" data-screen="deadline" aria-selected="false">3 · The deadline</button>
-    <button role="tab" data-screen="proof" aria-selected="false">4 · Does it actually work?</button>
+    <button role="tab" data-screen="twoexams" aria-selected="false">4 · Two exams</button>
+    <button role="tab" data-screen="proof" aria-selected="false">5 · Does it actually work?</button>
   </nav>
 
   <!-- ================= 1. SYLLABUS ================= -->
@@ -278,6 +308,12 @@ svg { display: block; width: 100%; height: auto; overflow: visible; }
         real deadline, and it is not the exam.</p>
       <figure><div id="ceilingChart" class="loading">—</div>
         <figcaption id="ceilingCaption"></figcaption></figure>
+
+      <div class="scrub">
+        <label for="startday">Drag to pick the day you start</label>
+        <input type="range" id="startday" min="0" max="86" value="0">
+        <div class="scrubout"><span id="scrubDay">today</span><span id="scrubVal">—</span></div>
+      </div>
       <div id="verdict"></div>
     </div>
 
@@ -291,7 +327,43 @@ svg { display: block; width: 100%; height: auto; overflow: visible; }
     </div>
   </section>
 
-  <!-- ================= 4. PROOF ================= -->
+  <!-- ================= 4. TWO EXAMS ================= -->
+  <section class="screen" id="screen-twoexams">
+    <div class="card">
+      <h2 class="title">You don't have one exam. You have two.</h2>
+      <p class="sub">Mid-sems in September, end-sems in November, and the same finite set of
+        nights in between. Revising for one costs you the other. Every published scheduler we
+        could find optimises unbounded retention, retention today, or the cost of remembering
+        something forever — none of them takes two calendar dates and a nightly limit. So the
+        honest answer is not a plan. It's a frontier.</p>
+
+      <div class="controls">
+        <div class="field"><label for="exam1">First exam · day</label>
+          <input type="number" id="exam1" value="20" min="2" max="200"></div>
+        <div class="field"><label for="exam2">Second exam · day</label>
+          <input type="number" id="exam2" value="87" min="3" max="365"></div>
+        <div class="field"><label for="budget">Minutes you'll spend, total</label>
+          <input type="number" id="budget" value="200" min="10" max="2000" step="10"></div>
+        <button class="action" id="runFrontier">Compute the frontier</button>
+      </div>
+
+      <div class="grid two">
+        <figure><div id="frontierChart" class="loading">—</div>
+          <figcaption id="frontierCaption"></figcaption></figure>
+        <div>
+          <div class="scrub">
+            <label for="tradeoff">Drag: who do you want to be good for?</label>
+            <input type="range" id="tradeoff" min="0" max="100" value="50">
+            <div class="scrubout"><span>end-sems</span><span>mid-sems</span></div>
+          </div>
+          <div class="tradegrid" id="tradeGrid"></div>
+        </div>
+      </div>
+      <div id="frontierVerdict"></div>
+    </div>
+  </section>
+
+  <!-- ================= 5. PROOF ================= -->
   <section class="screen" id="screen-proof">
     <div class="card">
       <h2 class="title">Scored on reviews it had never seen</h2>
@@ -301,6 +373,18 @@ svg { display: block; width: 100%; height: auto; overflow: visible; }
       <div class="stats" id="proofStats"></div>
       <div class="scroll" style="margin-top:22px"><div id="proofTable" class="loading">—</div></div>
       <p class="note" id="proofNote"></p>
+    </div>
+
+    <div class="card">
+      <h2 class="title">When it says 86%, do 86% actually recall?</h2>
+      <p class="sub">Ranking well is not the same as being honest about magnitude, and Ebb shows
+        you a number. Perfect calibration puts every point on the diagonal.</p>
+      <div class="grid two">
+        <figure><div id="calChart" class="loading">—</div>
+          <figcaption id="calCaption"></figcaption></figure>
+        <div><div class="scroll" id="horizonTable"></div>
+          <p class="note" id="calNote"></p></div>
+      </div>
     </div>
     <div class="card">
       <h2 class="title">What we got wrong on the way here</h2>
