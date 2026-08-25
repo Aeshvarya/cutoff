@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ebb.core.forecast import CardState, review_outcome
+from ebb.core.multi import dominated, frontier
 from ebb.core.planner import plan
 from ebb.model.dsr import DSRModel
 
@@ -227,6 +228,50 @@ def ceiling(request: PlanRequest) -> dict:
         "ceiling_if_you_wait_until_day": {"day": last_night, "best_possible": sampled[last_night]},
         "curve": [{"start_day": d, "best_possible": v} for d, v in sorted(sampled.items())],
     }
+
+
+class FrontierRequest(BaseModel):
+    cards: list[CardIn]
+    first_exam_day: int = Field(gt=0)
+    second_exam_day: int = Field(gt=0)
+    budget: int = Field(default=400, gt=0)
+    max_reviews_per_day: int = Field(default=40, gt=0)
+
+
+@app.post("/api/frontier")
+def two_exam_frontier(request: FrontierRequest) -> dict:
+    """Two exams, one set of nights, and no schedule that wins both."""
+    if request.second_exam_day <= request.first_exam_day:
+        raise HTTPException(400, "the second exam must come after the first")
+
+    cards = _to_states(request.cards)
+    points = frontier(
+        cards, request.first_exam_day, request.second_exam_day, W,
+        budget=request.budget, max_reviews_per_day=request.max_reviews_per_day,
+    )
+    flags = dominated(points)
+    return {
+        "first_exam_day": request.first_exam_day,
+        "second_exam_day": request.second_exam_day,
+        "budget": request.budget,
+        "minutes": request.budget * 0.5,
+        "points": [
+            {"weight": p.weight, "recall_first": p.recall_first, "recall_second": p.recall_second,
+             "average": p.average, "reviews_before_first": p.reviews_before_first,
+             "reviews_after_first": p.reviews_after_first, "dominated": d}
+            for p, d in zip(points, flags)
+        ],
+    }
+
+
+@app.get("/api/calibration")
+def calibration() -> dict:
+    """The reliability curve, read off the committed artifact."""
+    import json
+    path = ARTIFACTS / "calibration.json"
+    if not path.exists():
+        raise HTTPException(404, "no calibration artifact; run scripts/calibration.py")
+    return json.loads(path.read_text())
 
 
 @app.get("/api/proof")
