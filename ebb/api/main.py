@@ -25,7 +25,7 @@ from ebb.model.dsr import DSRModel
 
 ROOT = Path(__file__).resolve().parents[2]
 ARTIFACTS = ROOT / "artifacts"
-WEB_DIST = ROOT / "web" / "dist"
+WEB = ROOT / "web"   # hand-written, no build step
 
 MODEL = DSRModel.load(ARTIFACTS / "dsr.json") if (ARTIFACTS / "dsr.json").exists() else DSRModel()
 W = MODEL.parameters
@@ -240,9 +240,13 @@ def proof() -> dict:
 
 
 # The frontend, same origin. Mounted last so it never shadows /api.
-if WEB_DIST.exists():
-    app.mount("/assets", StaticFiles(directory=WEB_DIST / "assets"), name="assets")
+# No bundler: a build step is deployment risk we do not need, and the charts
+# are hand-drawn SVG rather than a chart library.
+if WEB.exists():
+    @app.get("/app.js")
+    def app_js() -> FileResponse:
+        return FileResponse(WEB / "app.js", media_type="application/javascript")
 
-    @app.get("/{full_path:path}")
-    def spa(full_path: str) -> FileResponse:
-        return FileResponse(WEB_DIST / "index.html")
+    @app.get("/")
+    def index() -> FileResponse:
+        return FileResponse(WEB / "index.html")
