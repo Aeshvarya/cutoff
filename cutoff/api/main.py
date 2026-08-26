@@ -22,6 +22,8 @@ from pydantic import BaseModel, Field
 from cutoff.core.forecast import CardState, review_outcome
 from cutoff.core.multi import dominated, frontier
 from cutoff.core.planner import plan
+from cutoff.ingest import llm as llm_ingest
+from cutoff.ingest.syllabus import parse as parse_syllabus
 from cutoff.model.dsr import DSRModel
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -57,6 +59,13 @@ class SelfTestItem(BaseModel):
     card_id: str
     concept: str
     rating: int = Field(ge=1, le=4, description="1 again, 2 hard, 3 good, 4 easy")
+
+
+class IngestRequest(BaseModel):
+    """A pasted syllabus, and whether the student wants the model to read it."""
+
+    text: str = Field(min_length=1, max_length=200_000)
+    use_llm: bool = True
 
 
 class ForecastRequest(BaseModel):
@@ -113,6 +122,51 @@ def calibrate(items: list[SelfTestItem]) -> dict:
             }
         )
     return {"cards": cards}
+
+
+@app.post("/api/ingest")
+def ingest(request: IngestRequest) -> dict:
+    """Read a syllabus into subjects and atomic items.
+
+    The language model, when a key is configured, does this job better than the
+    parser does -- it splits "Carnot, Rankine and Otto cycles" into three where
+    the parser splits on the comma and leaves "and Otto cycles". When there is
+    no key, or the call fails, the parser answers instead and the response says
+    so. The product never stops working because an API did.
+
+    Nothing downstream can tell which path ran: both return the same shape, and
+    the forecast is computed from the fitted memory model either way.
+    """
+    text = request.text.strip()
+    if not text:
+        raise HTTPException(400, "no text supplied")
+
+    source, note = "rules", "Read by the built-in parser. No model was called."
+    subjects = []
+
+    if request.use_llm and llm_ingest.available():
+        try:
+            subjects = llm_ingest.extract(text)
+            source = "gemini"
+            note = ("Read by Gemini, which extracted the items only. "
+                    "Every number after this is computed by the memory model.")
+        except llm_ingest.IngestUnavailable as exc:
+            note = f"Model unavailable ({exc.__class__.__name__}); read by the built-in parser instead."
+
+    if not subjects:
+        subjects = parse_syllabus(text)
+
+    if not subjects:
+        raise HTTPException(422, "could not find any subjects or facts in that text")
+
+    return {
+        "source": source,
+        "note": note,
+        "llm_configured": llm_ingest.available(),
+        "n_subjects": len(subjects),
+        "n_items": sum(s.n_items for s in subjects),
+        "subjects": [s.as_dict() for s in subjects],
+    }
 
 
 @app.post("/api/forecast")
