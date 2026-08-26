@@ -1,0 +1,5 @@
+-r requirements.txt
+
+# Training and evaluation only -- never installed on the host.
+scipy
+pytest

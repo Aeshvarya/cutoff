@@ -1,4 +1,6 @@
+# What the running service needs. Deliberately four packages: the model is a
+# JSON of sixteen floats, so production never imports a training stack.
 fastapi
 uvicorn[standard]
 numpy
-scipy
+httpx

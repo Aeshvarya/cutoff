@@ -2,7 +2,7 @@
 
     python scripts/train.py --train 1000000 --test 200000
 
-Writes artifacts/weights.json and artifacts/evaluation.json. Every number Ebb
+Writes artifacts/weights.json and artifacts/evaluation.json. Every number Cutoff
 ever shows a user traces back to these two files.
 """
 

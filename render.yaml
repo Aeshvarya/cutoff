@@ -1,0 +1,17 @@
+# Deploy blueprint. The free tier sleeps after fifteen idle minutes, so
+# .github/workflows/keep-warm.yml pings /api/health on a schedule -- a judge
+# opening the link a week later should not meet a cold start.
+services:
+  - type: web
+    name: cutoff
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn cutoff.api.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.6"
+      - key: GEMINI_API_KEY
+        sync: false          # set in the dashboard; the app runs without it

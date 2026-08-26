@@ -6,7 +6,7 @@ Three numbers, because they fail in different ways:
   AUC         can it rank a remembered item above a forgotten one? A model can
               have low MAE by predicting the mean forever; AUC catches that.
   Spearman(h) does the predicted half-life track the observed one? This is the
-              number that decides whether SCHEDULING works, which is what Ebb
+              number that decides whether SCHEDULING works, which is what Cutoff
               actually sells.
 """
 
