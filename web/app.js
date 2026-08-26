@@ -7,17 +7,84 @@ const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n
 const pct = (x) => (x * 100).toFixed(1) + "%";
 const pct0 = (x) => Math.round(x * 100) + "%";
 
+const CARDS_PER_COURSE = 75;   // used only for a subject you type in by hand
+
+/* A syllabus line is a topic, not a fact. "Entropy, Clausius inequality,
+   reversibility" is three topics and a good many more cards. Rather than guess
+   silently, Cutoff exposes the multiplier and shows the total it produces --
+   this is the one number on the site the student supplies rather than the model,
+   and it is labelled that way on screen. */
+const DEFAULT_DENSITY = 6;
+const density = () => Math.max(1, Math.min(30, +($("#density")?.value) || DEFAULT_DENSITY));
+
+/* Ratings for the sample semester only, so a first-time visitor sees a real
+   spread instead of eight identical subjects. Your own syllabus starts neutral. */
+const SAMPLE_RATINGS = {
+  "Chemical Engineering Thermodynamics": 2, "Fluid Mechanics": 1, "Heat Transfer": 3,
+  "Mass Transfer": 3, "Chemical Reaction Engineering": 2, "Process Control": 4,
+  "Thermal Operations": 3, "Chemical Technology": 4,
+};
 const DEFAULT_COURSES = [
-  { name: "Thermodynamics", rating: 2 },
-  { name: "Fluid Mechanics", rating: 1 },
-  { name: "Mass Transfer", rating: 3 },
-  { name: "Heat Transfer", rating: 3 },
-  { name: "Reaction Engineering", rating: 2 },
-  { name: "Process Control", rating: 4 },
-  { name: "Thermal Operations", rating: 3 },
-  { name: "Chemical Technology", rating: 4 },
+  { name: "Thermodynamics", rating: 2, n: CARDS_PER_COURSE },
+  { name: "Fluid Mechanics", rating: 1, n: CARDS_PER_COURSE },
+  { name: "Mass Transfer", rating: 3, n: CARDS_PER_COURSE },
+  { name: "Heat Transfer", rating: 3, n: CARDS_PER_COURSE },
+  { name: "Reaction Engineering", rating: 2, n: CARDS_PER_COURSE },
+  { name: "Process Control", rating: 4, n: CARDS_PER_COURSE },
+  { name: "Thermal Operations", rating: 3, n: CARDS_PER_COURSE },
+  { name: "Chemical Technology", rating: 4, n: CARDS_PER_COURSE },
 ];
-const CARDS_PER_COURSE = 75;
+
+/* A realistic semester, so the paste box can be demonstrated without asking a
+   judge to type one. It is read by exactly the same endpoint as your own. */
+const SAMPLE_SYLLABUS = `CHE 201 — Chemical Engineering Thermodynamics
+Unit 1: Laws and state functions
+Zeroth law, first law, closed and open systems; internal energy, enthalpy, heat capacity
+Unit 2: Second law
+Entropy, Clausius inequality, reversibility, availability, exergy analysis
+Unit 3: Phase equilibria
+Raoult's law, Henry's law, activity coefficients, fugacity, VLE calculations
+
+CHE 202 — Fluid Mechanics
+Unit 1: Fluid statics
+Pressure distribution, manometry, buoyancy, forces on submerged surfaces
+Unit 2: Flow of fluids
+Continuity equation, Navier–Stokes equations, Bernoulli equation, boundary layers
+Unit 3: Flow measurement and machinery
+Orifice meter, venturi meter, rotameter, pitot tube, centrifugal pumps, NPSH
+
+CHE 203 — Heat Transfer
+Conduction, Fourier's law, steady and unsteady conduction, fins
+Convection, Nusselt number, forced convection, natural convection
+Radiation, Stefan–Boltzmann law, view factors, grey surfaces
+Heat exchangers, LMTD method, NTU method, fouling factors
+
+CHE 204 — Mass Transfer
+Molecular diffusion, Fick's law, equimolar counter-diffusion
+Interphase mass transfer, two-film theory, penetration theory
+Absorption, stripping, HTU and NTU, packed column design
+
+CHE 205 — Chemical Reaction Engineering
+Rate laws, order of reaction, Arrhenius equation, activation energy
+Batch reactor, CSTR, PFR design equations, space time
+Non-ideal flow, residence time distribution, dispersion model
+Catalysis, adsorption isotherms, effectiveness factor
+
+CHE 206 — Process Control
+Process dynamics, first and second order systems, transfer functions
+Laplace transforms, block diagrams, closed loop response
+PID controllers, tuning rules, stability, Bode and Nyquist criteria
+
+CHE 207 — Thermal Operations
+Evaporation, single and multiple effect, boiling point elevation
+Distillation, McCabe–Thiele method, reflux ratio, tray efficiency
+Drying, humidity charts, drying rate curves
+
+CHE 208 — Chemical Technology
+Sulphuric acid manufacture, contact process
+Ammonia synthesis, Haber process, catalyst regeneration
+Petroleum refining, distillation, cracking, reforming
+Polymers, polymerisation routes, industrial safety`;
 const GRADE_WORDS = { 1: "gone", 2: "shaky", 3: "solid", 4: "cold" };
 
 const state = { courses: structuredClone(DEFAULT_COURSES), cards: [], forecast: null, ceiling: null, plan: null };
@@ -689,10 +756,12 @@ function renderFindings() {
 
 /* ------------------------------------------------------------- courses UI */
 function renderCourses() {
+  const total = state.courses.reduce((n, c) => n + (c.n || CARDS_PER_COURSE), 0);
+  $("#percourse").textContent = total.toLocaleString();
   $("#courses").innerHTML = state.courses.map((c, i) => `
     <div class="course">
       <div><div class="name">${c.name}</div>
-        <div class="meta">${CARDS_PER_COURSE} facts · you say it's ${GRADE_WORDS[c.rating]}</div></div>
+        <div class="meta">${c.topics ? `${c.topics} topics · ${c.n} facts` : `${c.n} facts`} · you say it's ${GRADE_WORDS[c.rating]}</div></div>
       <div class="grades" data-i="${i}">
         ${[1, 2, 3, 4].map((g) => `<button data-g="${g}" aria-pressed="${c.rating === g}">${g}</button>`).join("")}
       </div>
@@ -730,13 +799,13 @@ function showScreen(name) {
   if (location.hash.slice(1) !== name) history.replaceState(null, "", "#" + name);
 }
 
-async function run() {
+async function run({ navigate = false } = {}) {
   const days = daysToExam();
   const cap = +$("#cap").value || 40;
   const target = +$("#target").value;
 
   const items = state.courses.flatMap((c) =>
-    Array.from({ length: CARDS_PER_COURSE }, (_, i) =>
+    Array.from({ length: c.n || CARDS_PER_COURSE }, (_, i) =>
       ({ card_id: `${c.name.slice(0, 4)}-${i}`, concept: c.name, rating: c.rating })));
 
   const btn = $("#run"); btn.disabled = true; btn.textContent = "Computing…";
@@ -813,7 +882,10 @@ async function run() {
       ? `Each bar is one evening. ${Math.round(plan.total_minutes)} minutes in total, across ${plan.sessions.length} days, gets you to ${pct(plan.recall_after)}.`
       : `Each bar is one evening. Even working flat out this only reaches ${pct(plan.recall_after)} — there aren't enough nights left for your target.`;
 
-    const landing = wanted();
+    // Pressing the button must show a result. Booting must not skip the
+    // step where you tell it what you're studying.
+    const current = location.hash.slice(1);
+    const landing = navigate && (!current || current === "syllabus") ? "home" : wanted();
     showScreen(landing);
     if (landing === "twoexams") runFrontier();
   } catch (err) {
@@ -878,10 +950,53 @@ document.querySelectorAll("nav.tabs button").forEach((b) =>
     showScreen(b.dataset.screen);
     if (b.dataset.screen === "twoexams" && !frontierPoints && state.cards.length) runFrontier();
   }));
-$("#run").addEventListener("click", run);
+$("#run").addEventListener("click", () => run({ navigate: true }));
+
+/* ---------------------------------------------------------- syllabus intake */
+function applyDensity() {
+  for (const c of state.courses) if (c.topics) c.n = c.topics * density();
+  renderCourses();
+}
+
+async function readSyllabus({ seedRatings = false } = {}) {
+  const text = $("#syllabusText").value.trim();
+  const note = $("#ingestNote");
+  if (!text) { note.className = "ingest-note bad"; note.textContent = "Paste something first."; return; }
+
+  const btn = $("#readSyllabus"); btn.disabled = true; btn.textContent = "Reading…";
+  note.className = "ingest-note"; note.textContent = "";
+  try {
+    const out = await api("/api/ingest", { text });
+    state.courses = out.subjects.map((s) => ({
+      name: s.name,
+      rating: seedRatings ? (SAMPLE_RATINGS[s.name] || 3) : 3,
+      topics: s.n_items,
+      n: s.n_items * density(),
+      items: s.items,
+    }));
+    renderCourses();
+    const total = out.n_items * density();
+    const who = out.source === "gemini" ? "Gemini read it" : "Read by the built-in parser";
+    note.innerHTML = `${who}: <strong>${out.n_subjects} subjects</strong>, ` +
+      `<strong>${out.n_items.toLocaleString()} topics</strong> — ` +
+      `<strong>${total.toLocaleString()} facts</strong> at ${density()} per line. ` +
+      `It only split the text up. Every number after this is computed by the memory model.`;
+  } catch (e) {
+    note.className = "ingest-note bad";
+    note.textContent = "Couldn't find any subjects in that. Try pasting the syllabus with its headings.";
+  } finally {
+    btn.disabled = false; btn.textContent = "Read my syllabus →";
+  }
+}
+$("#readSyllabus").addEventListener("click", () => readSyllabus());
+$("#sampleSyllabus").addEventListener("click", () => {
+  $("#syllabusText").value = SAMPLE_SYLLABUS;
+  readSyllabus({ seedRatings: true });
+});
+$("#density").addEventListener("change", applyDensity);
 $("#addcourse").addEventListener("click", () => {
   const name = prompt("Subject name?");
-  if (name) { state.courses.push({ name, rating: 3 }); renderCourses(); }
+  if (name) { state.courses.push({ name, rating: 3, n: CARDS_PER_COURSE }); renderCourses(); }
 });
 
 const SCREENS = ["home", "syllabus", "forecast", "deadline", "twoexams", "howitworks", "proof"];
@@ -890,7 +1005,6 @@ const wanted = () => (SCREENS.includes(location.hash.slice(1)) ? location.hash.s
 (function init() {
   const d = new Date(); d.setDate(d.getDate() + 87);
   $("#examdate").value = d.toISOString().slice(0, 10);
-  $("#percourse").textContent = CARDS_PER_COURSE;
   renderCourses();
   renderFindings();
   api("/api/proof").then(renderProof).catch(() => {

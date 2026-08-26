@@ -260,7 +260,20 @@ svg { display: block; width: 100%; height: auto; overflow: visible; }
               animation: draw .85s cubic-bezier(.22,.61,.36,1) forwards; }
 }
 @keyframes draw { to { stroke-dashoffset: 0; } }
-</style>
+
+    /* ---- syllabus intake ---- */
+    .ingest textarea {
+      width: 100%; box-sizing: border-box; resize: vertical;
+      background: var(--surface-2); color: var(--text-primary);
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 12px 14px; font: 400 13px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .ingest textarea:focus { outline: none; border-color: var(--series-1); }
+    .ingest-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+    .ingest-note { color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
+    .ingest-note strong { color: var(--text-primary); font-weight: 600; }
+    .ingest-note.bad { color: var(--warning); }
+  </style>
 </head>
 <body>
 <div class="wrap">
@@ -312,11 +325,27 @@ svg { display: block; width: 100%; height: auto; overflow: visible; }
   <!-- ================= 1. SYLLABUS ================= -->
   <section class="screen" id="screen-syllabus">
     <div class="card">
-      <h2 class="title">Tell it how well you know each subject</h2>
-      <p class="sub">Cutoff can't guess what's in your head, so start by being honest about
-        each subject. Tap a number: <strong>1</strong> if it's completely gone,
-        <strong>4</strong> if you could teach it. That's the only setup there is —
-        everything else on this site is worked out from these taps and today's date.</p>
+      <h2 class="title">Start with your actual syllabus</h2>
+      <p class="sub">Paste the syllabus your department handed you, or your own notes.
+        Cutoff splits it into subjects and into the individual facts you'd have to
+        recall in the exam — because "eight subjects" and
+        "eight subjects, four hundred separate things to recall" are very different
+        amounts of work, and only one of them can be scheduled.</p>
+
+      <div class="ingest">
+        <textarea id="syllabusText" rows="6" spellcheck="false"
+          placeholder="CHE 201 — Chemical Engineering Thermodynamics&#10;Unit 1: Laws and state functions&#10;Zeroth law, first law, closed and open systems; internal energy, enthalpy&#10;&#10;CHE 202 — Fluid Mechanics&#10;Continuity, Navier–Stokes, Bernoulli, boundary layers"></textarea>
+        <div class="ingest-row">
+          <button id="readSyllabus" class="action">Read my syllabus →</button>
+          <button id="sampleSyllabus" class="action ghost">Use a sample semester</button>
+          <span id="ingestNote" class="ingest-note"></span>
+        </div>
+      </div>
+
+      <p class="sub" style="margin-top:26px">Now tell it how well you know each one.
+        Tap a number: <strong>1</strong> if it's completely gone, <strong>4</strong> if
+        you could teach it. That's the whole setup — everything else on this site is
+        worked out from your syllabus, these taps, and today's date.</p>
 
       <div class="controls">
         <div class="field">
@@ -326,6 +355,10 @@ svg { display: block; width: 100%; height: auto; overflow: visible; }
         <div class="field">
           <label for="cap">How many facts can you revise in one sitting?</label>
           <input type="number" id="cap" value="40" min="5" max="300" step="5">
+        </div>
+        <div class="field">
+          <label for="density">How many facts is one syllabus line worth?</label>
+          <input type="number" id="density" value="6" min="1" max="30" step="1">
         </div>
         <div class="field">
           <label for="target">How much do you want to know on the day?</label>
@@ -346,8 +379,8 @@ svg { display: block; width: 100%; height: auto; overflow: visible; }
       </div>
       <p class="note"><strong>1</strong> = gone · <strong>2</strong> = shaky ·
         <strong>3</strong> = solid · <strong>4</strong> = I could teach it.
-        Each subject is treated as <span id="percourse">75</span> separate facts you'd need to
-        recall in an exam.</p>
+        Cutoff is tracking <span id="percourse">600</span> separate facts across these
+        subjects — every one of them forecast on its own, then added up.</p>
     </div>
   </section>
 
