@@ -139,7 +139,10 @@ body::after {
 .navbtn[aria-current="true"] { background: var(--accent-dim); color: var(--crema); }
 .navbtn[aria-current="true"] svg { opacity: 1; }
 .navbtn .txt { overflow: hidden; text-overflow: ellipsis; }
-.rail.collapsed .navbtn .txt { opacity: 0; }
+.rail.collapsed .navbtn { justify-content: center; padding-left: 0; padding-right: 0; }
+.rail.collapsed .navbtn .txt { display: none; }
+.rail.collapsed .brand .nm { display: none; }
+.rail.collapsed .brand { justify-content: center; padding-left: 0; }
 .navbtn .dotwarn { margin-left: auto; width: 6px; height: 6px; border-radius: 50%; background: var(--critical); flex: none; }
 .rail.collapsed .navbtn .dotwarn { display: none; }
 
@@ -172,6 +175,8 @@ body::after {
 .chip b { color: var(--text-primary); font-weight: 600; }
 .chip .d { width: 7px; height: 7px; border-radius: 50%; flex: none; }
 button.chip { cursor: pointer; font-family: inherit; }
+#railOpen { display: none; padding: 7px 10px; }
+@media (max-width: 860px) { #railOpen { display: inline-flex; } }
 button.chip:hover { border-color: var(--border-strong); color: var(--text-primary); }
 button.chip[aria-pressed="true"] { background: var(--accent-dim); border-color: rgba(217,154,83,.4); color: var(--crema); }
 
@@ -343,10 +348,11 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border: 3px sol
 .scrubout span:last-child { font-weight: 620; color: var(--text-primary); }
 
 /* ============================ the cup ============================ */
-.cupwrap { display: grid; grid-template-columns: minmax(0,auto) minmax(0,1fr); gap: clamp(14px,2vw,26px); align-items: center; flex: 1; min-height: 0; }
+.cupwrap { display: grid; grid-template-columns: minmax(210px, 42%) minmax(0,1fr); gap: clamp(14px,2vw,26px); align-items: center; flex: 1; min-height: 0; }
 @media (max-width: 720px) { .cupwrap { grid-template-columns: 1fr; } }
-.cupstage { position: relative; display: grid; place-items: center; min-height: 0; height: 100%; }
-.cupstage svg { width: 100%; height: 100%; max-height: 340px; }
+.cupstage { position: relative; display: grid; min-height: 0; height: 100%; }
+.cupstage .plot { min-height: 230px; width: 100%; }
+
 .cupside { min-width: 0; }
 
 /* ============================ focus timer ============================ */
@@ -461,6 +467,9 @@ textarea { resize: vertical; font: 400 12.5px/1.7 ui-monospace, SFMono-Regular, 
 <!-- ============================ stage ============================ -->
 <main class="stage">
   <div class="topbar">
+    <button class="chip" id="railOpen" title="Show the menu" aria-label="Show the menu">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
     <div>
       <h1 id="pageTitle">Today</h1>
       <div class="sub" id="pageSub"></div>
@@ -483,7 +492,7 @@ textarea { resize: vertical; font: 400 12.5px/1.7 ui-monospace, SFMono-Regular, 
         <p class="sub">How full the cup is = how much of your syllabus you'd still hold on the day,
           if you did nothing between now and then. The ring is how much of your window is left.</p>
         <div class="cupwrap">
-          <div class="cupstage"><div id="cupChart" class="loading">brewing…</div></div>
+          <div class="cupstage"><div id="cupChart" class="plot loading">brewing…</div></div>
           <div class="cupside readout">
             <div class="words" id="cupWords">—</div>
             <div class="rangeline" id="cupRange"></div>

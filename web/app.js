@@ -172,9 +172,11 @@ function chart(host, draw) {
   host.classList.remove("loading");
   host._draw = draw;
   if (!host._ro) {
-    host._ro = new ResizeObserver(() => paint(host));
+    host._ro = new ResizeObserver(() => paint(host));   // resize only redraws on a real size change
     host._ro.observe(host);
-  } else paint(host);
+  }
+  host._painted = false;                                 // new data always redraws
+  paint(host);
 }
 function paint(host) {
   const w = Math.round(host.clientWidth), h = Math.round(host.clientHeight);
@@ -299,7 +301,7 @@ function renderCup(level, target, ringFrac, cold) {
     const ty = y1 - 6 - inner * clamp01(target);
     el("line", { x1: x0 - 2, x2: x0 + cupW + 2, y1: ty, y2: ty, stroke: css("--crema"),
       "stroke-width": 1.5, "stroke-dasharray": "5 5", opacity: .85 }, svg);
-    text(svg, x0 + cupW + 8, ty + 4, "target", { fill: css("--crema"), size: 11, weight: 600 });
+    text(svg, x0 + 7, ty - 6, "target", { fill: css("--crema"), size: 11, weight: 600 });
 
     // --- outline + handle, on top of the liquid ---
     el("path", { d: body, fill: "none", stroke: css("--text-secondary"), "stroke-width": 2, "stroke-linejoin": "round" }, svg);
@@ -632,11 +634,12 @@ function renderFrontier(data) {
       el("line", { x1: box.x, x2: box.x + box.w, y1: Y(v), y2: Y(v), stroke: css("--border"), "stroke-width": 1 }, svg);
       text(svg, box.x - 8, Y(v) + 4, Math.round(v * 100) + "%", { anchor: "end" });
       const h = xmin + (xmax - xmin) * i / 3;
-      text(svg, X(h), box.y + box.h + 17, Math.round(h * 100) + "%", { anchor: "middle" });
+      text(svg, X(h), box.y + box.h + 18, Math.round(h * 100) + "%", { anchor: i === 0 ? "start" : "middle" });
     }
-    text(svg, box.x + box.w / 2, H - 6, "what you hold at END-SEMS →", { anchor: "middle", fill: css("--text-secondary"), size: 11.5 });
+    // the axis titles wear the same colours as the two cells in the trade panel
+    text(svg, box.x + box.w / 2, H - 6, "what you hold at END-SEMS →", { anchor: "middle", fill: css("--series-2"), size: 11.5, weight: 600 });
     text(svg, -(box.y + box.h / 2), 13, "what you hold at MID-SEMS →",
-      { anchor: "middle", fill: css("--text-secondary"), size: 11.5, attrs: { transform: "rotate(-90)" } });
+      { anchor: "middle", fill: css("--series-1"), size: 11.5, weight: 600, attrs: { transform: "rotate(-90)" } });
 
     const live = pts.filter((p) => !p.dominated).sort((a, b) => a.recall_second - b.recall_second);
     animate(el("path", { d: line(live.map((p) => [X(p.recall_second), Y(p.recall_first)])), fill: "none",
@@ -1030,6 +1033,11 @@ async function runFrontier() {
   const budget = Math.round(+$("#budget").value / 0.5);
   if (second <= first) { alert("The second exam has to come after the first."); return; }
   const btn = $("#runFrontier"); btn.disabled = true; btn.textContent = "Computing…";
+  // eight full schedules, simulated night by night -- say so rather than
+  // showing an empty card for eight seconds
+  const host = $("#frontierChart");
+  host._draw = null; host._painted = false; host.classList.add("loading");
+  host.textContent = "simulating eight revision plans, night by night…";
   try {
     const data = await api("/api/frontier", {
       cards: state.cards, first_exam_day: first, second_exam_day: second, budget,
@@ -1182,6 +1190,7 @@ async function readSyllabus({ seedRatings = false } = {}) {
 /* ================================== boot ================================== */
 $$(".navbtn[data-screen]").forEach((b) => b.addEventListener("click", () => showScreen(b.dataset.screen)));
 $("#railToggle").addEventListener("click", () => setRail(!$("#rail").classList.contains("collapsed")));
+$("#railOpen").addEventListener("click", () => setRail(false));
 $("#run").addEventListener("click", () => run({ navigate: true }));
 $("#runFrontier").addEventListener("click", runFrontier);
 $("#readSyllabus").addEventListener("click", () => readSyllabus());
