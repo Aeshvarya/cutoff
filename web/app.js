@@ -165,6 +165,22 @@ function barPath(x, y, w, h, r) {
   return `M${x},${y + h} L${x},${y + r} Q${x},${y} ${x + r},${y} L${x + w - r},${y} Q${x + w},${y} ${x + w},${y + r} L${x + w},${y + h} Z`;
 }
 
+/** A vertical fade of one colour, for area fills under a line. */
+function fadeUnder(svg, id, colour, top = 0.3) {
+  const d = el("defs", {}, svg);
+  const g = el("linearGradient", { id, x1: "0%", y1: "0%", x2: "0%", y2: "100%" }, d);
+  el("stop", { offset: "0%", "stop-color": colour, "stop-opacity": top }, g);
+  el("stop", { offset: "100%", "stop-color": colour, "stop-opacity": 0 }, g);
+  return `url(#${id})`;
+}
+/** 45-degree hatch, for a region that is out of reach rather than merely low. */
+function hatch(svg, id, colour) {
+  const d = el("defs", {}, svg);
+  const p = el("pattern", { id, width: 7, height: 7, patternTransform: "rotate(45)", patternUnits: "userSpaceOnUse" }, d);
+  el("line", { x1: 0, y1: 0, x2: 0, y2: 7, stroke: colour, "stroke-width": 1.4, opacity: .30 }, p);
+  return `url(#${id})`;
+}
+
 /** Draw into a host element, and redraw it whenever the host resizes.
     The viewBox is in real pixels, so 11px text is 11px whatever the window. */
 function chart(host, draw) {
@@ -263,8 +279,11 @@ const axis = (svg, box) => el("line", { x1: box.x, x2: box.x + box.w, y1: box.y 
    Sparkles = you are above target. They stop when you are not.
    Every one of those is labelled in words underneath — the gauge is a picture
    of numbers that are also written down, never the only place they appear. */
-function renderCup(level, target, ringFrac, cold) {
-  chart($("#cupChart"), (svg, W, H) => {
+function renderGauge(level, target, ringFrac, cold) {
+  chart($("#gaugeChart"), (svg, W, H) => {
+    // Small copies drop their labels rather than stacking four of them on top
+    // of each other; the numbers are all in the sentence beside it anyway.
+    const compact = Math.min(W, H) < 210;
     const size = Math.min(W, H * 0.92);
     const cx = W / 2, cy = H / 2 + size * 0.04;
     // room for the urgency ring outside the gauge and for the target label
@@ -287,7 +306,7 @@ function renderCup(level, target, ringFrac, cold) {
 
     // glow filter for the level arc
     const glow = el("filter", { id: "gaugeGlow", x: "-30%", y: "-30%", width: "160%", height: "160%" }, defs);
-    el("feGaussianBlur", { in: "SourceGraphic", stdDeviation: cold ? "2" : "5", result: "blur" }, glow);
+    el("feGaussianBlur", { in: "SourceGraphic", stdDeviation: cold ? "2" : compact ? "2.5" : "5", result: "blur" }, glow);
     const merge = el("feMerge", {}, glow);
     el("feMergeNode", { in: "blur" }, merge);
     el("feMergeNode", { in: "SourceGraphic" }, merge);
@@ -346,7 +365,7 @@ function renderCup(level, target, ringFrac, cold) {
     // and the word was being cut in half by the edge of the box
     const tLx = Math.max(28, Math.min(W - 28, cx + tLabelR * Math.cos(tgtRad)));
     const tLy = Math.max(12, Math.min(H - 6, cy + tLabelR * Math.sin(tgtRad)));
-    text(svg, tLx, tLy + 4, "target", { fill: css("--crema"), size: 10.5, weight: 600, anchor: "middle" });
+    if (!compact) text(svg, tLx, tLy + 4, "target", { fill: css("--crema"), size: 10.5, weight: 600, anchor: "middle" });
 
     // --- outer urgency ring (thinner, behind everything) ---
     const ringR = R + 12;
@@ -367,13 +386,13 @@ function renderCup(level, target, ringFrac, cold) {
     const centre = state.exact ? pct(lv) : Math.round(lv * 10) + " in 10";
     const scoreT = text(svg, cx, cy + 2, centre, {
       fill: cold ? css("--text-muted") : css("--text-primary"),
-      size: Math.max(20, R * (state.exact ? 0.3 : 0.26)), weight: 700, anchor: "middle"
+      size: Math.max(15, R * (state.exact ? 0.3 : 0.27)), weight: 700, anchor: "middle"
     });
     scoreT.setAttribute("font-family", css("--display"));
     scoreT.setAttribute("letter-spacing", "-.03em");
 
     // "on exam morning" sub-label
-    text(svg, cx, cy + Math.max(18, R * 0.2), "on exam morning", {
+    if (!compact) text(svg, cx, cy + Math.max(18, R * 0.2), "on exam morning", {
       fill: css("--text-muted"), size: Math.max(10, R * 0.1), anchor: "middle"
     });
 
@@ -397,16 +416,210 @@ function renderCup(level, target, ringFrac, cold) {
     }
 
     // --- bottom scale labels ---
-    const bottomY = cy + arcR + trackW + 26;
-    text(svg, cx - arcR * 0.85, bottomY, "0%", { fill: css("--text-muted"), size: 11, anchor: "start" });
-    text(svg, cx + arcR * 0.85, bottomY, "100%", { fill: css("--text-muted"), size: 11, anchor: "end" });
+    if (!compact) {
+      const bottomY = cy + arcR + trackW + 26;
+      text(svg, cx - arcR * 0.85, bottomY, "0%", { fill: css("--text-muted"), size: 11, anchor: "start" });
+      text(svg, cx + arcR * 0.85, bottomY, "100%", { fill: css("--text-muted"), size: 11, anchor: "end" });
+    }
   });
 }
 // keyframes for the sparkles, injected once
 if (!document.getElementById("cupkf")) {
   const s = document.createElement("style"); s.id = "cupkf";
-  s.textContent = "@keyframes sparkle{0%{opacity:0;transform:scale(.5)}50%{opacity:.7;transform:scale(1.3)}100%{opacity:0;transform:scale(.5)}}";
+  s.textContent = `
+    @keyframes sparkle{0%{opacity:0;transform:scale(.5)}50%{opacity:.7;transform:scale(1.3)}100%{opacity:0;transform:scale(.5)}}
+    @keyframes steam{0%{opacity:0;transform:translateY(6px) scaleY(.9)}35%{opacity:.34}100%{opacity:0;transform:translateY(-16px) scaleY(1.15)}}
+    @keyframes slosh{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+    @keyframes bubble{0%{transform:translateY(0) scale(.7);opacity:0}25%{opacity:.45}100%{transform:translateY(-46px) scale(1);opacity:0}}
+    @keyframes splash{0%{transform:translate(0,0) scale(.4);opacity:.85}100%{transform:translate(var(--dx),-16px) scale(1);opacity:0}}
+    @keyframes streamin{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+    @keyframes streamout{to{opacity:0}}
+    @keyframes sway{0%,100%{transform:translateX(-1.5px)}50%{transform:translateX(1.5px)}}
+    @keyframes fadein{to{opacity:.34}}
+    @keyframes cremaIn{to{opacity:1}}
+    @keyframes ripple{0%{transform:scale(.3);opacity:.55}100%{transform:scale(3.4);opacity:0}}
+    @keyframes streamlife{0%{opacity:0}6%{opacity:.95}78%{opacity:.95}100%{opacity:0}}
+    @keyframes pour{from{transform:translateY(var(--drop))}to{transform:translateY(0)}}`;
   document.head.append(s);
+}
+
+
+/* ============================ the pour ============================
+   The cup is the forecast: it fills to what you'd hold on exam morning, the
+   dashed line is your target, the arc under the saucer is how much of your
+   window is left, and it only steams when you're above target. It pours itself
+   on every fresh forecast -- and again if you click it.
+
+   All of the motion is CSS keyframes on top of a scene that is already correct
+   when it is drawn, so a browser that refuses to animate shows a full cup
+   rather than an empty one. */
+function renderCup(level, target, ringFrac, cold, daysLeft) {
+  const host = $("#cupChart");
+  if (host && !host._pourWired) {
+    host._pourWired = true;
+    host.style.cursor = "pointer";
+    host.title = "click to pour it again";
+    host.addEventListener("click", () => repaint(host));
+  }
+  chart(host, (svg, W, H) => {
+    const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const cream = css("--crema"), ink = css("--text-secondary");
+
+    /* ---- the glass, seen slightly from above, so every horizontal edge is an
+       ellipse and the coffee has a real surface rather than a flat line ---- */
+    const cupW = Math.min(W * 0.52, H * 0.34);
+    const cupH = cupW * 0.96;
+    const coneH = Math.min(44, H * 0.1);
+    const gap = Math.min(58, H * 0.14);
+    const below = 48;
+    const top = Math.max(6, (H - (coneH + gap + cupH + below)) / 2);
+    const cx = W / 2;
+    const coneW = cupW * 0.62, coneTop = top, coneBot = top + coneH;
+    const y0 = coneBot + gap, y1 = y0 + cupH;      // rim centre, base centre
+    const rimRx = cupW / 2, rimRy = rimRx * 0.20;
+    const botRx = rimRx * 0.82, botRy = botRx * 0.17;
+    const halfW = (y) => botRx + (rimRx - botRx) * ((y1 - y) / cupH);
+    const ellRy = (y) => botRy + (rimRy - botRy) * ((y1 - y) / cupH);
+
+    const defs = el("defs", {}, svg);
+    const grad = (id, stops, attrs = {}) => {
+      const g = el("linearGradient", { id, x1: "0%", y1: "0%", x2: "0%", y2: "100%", ...attrs }, defs);
+      for (const [o, c, op] of stops) el("stop", { offset: o, "stop-color": c, "stop-opacity": op === undefined ? 1 : op }, g);
+      return `url(#${id})`;
+    };
+    const coffee = cold
+      ? grad("cf", [["0%", "#6b5c52"], ["100%", "#3d3630"]])
+      : grad("cf", [["0%", "#c9762f"], ["45%", "#a4551f"], ["100%", "#5d2c0e"]]);
+    const glass = grad("gl", [["0%", "#ffffff", .10], ["18%", "#ffffff", .03], ["82%", "#ffffff", .02], ["100%", "#ffffff", .09]]);
+    const cremaG = el("radialGradient", { id: "cr", cx: "38%", cy: "34%", r: "72%" }, defs);
+    el("stop", { offset: "0%", "stop-color": cold ? "#8b7d72" : "#f0d5ad" }, cremaG);
+    el("stop", { offset: "70%", "stop-color": cold ? "#6f635a" : "#d9a465" }, cremaG);
+    el("stop", { offset: "100%", "stop-color": cold ? "#5b4f47" : "#b7762f" }, cremaG);
+    const halo = el("radialGradient", { id: "halo", cx: "50%", cy: "50%", r: "50%" }, defs);
+    el("stop", { offset: "0%", "stop-color": cold ? "rgba(91,79,71,.13)" : "rgba(201,118,47,.15)" }, halo);
+    el("stop", { offset: "100%", "stop-color": "transparent" }, halo);
+    const soft = el("filter", { id: "soft", x: "-60%", y: "-60%", width: "220%", height: "220%" }, defs);
+    el("feGaussianBlur", { stdDeviation: 3.4 }, soft);
+
+    // warm light behind the glass
+    el("ellipse", { cx, cy: y0 + cupH * 0.55, rx: cupW * 1.15, ry: cupH * 0.78, fill: "url(#halo)" }, svg);
+
+    /* ---- dripper ---- */
+    el("path", { d: `M${cx - coneW / 2},${coneTop} L${cx + coneW / 2},${coneTop} L${cx + coneW * 0.08},${coneBot} L${cx - coneW * 0.08},${coneBot} Z`,
+      fill: "rgba(255,255,255,.03)", stroke: css("--text-muted"), "stroke-width": 1.6, "stroke-linejoin": "round", opacity: .8 }, svg);
+    el("ellipse", { cx, cy: coneTop, rx: coneW / 2, ry: coneW * 0.09, fill: css("--espresso"),
+      stroke: ink, "stroke-width": 2 }, svg);
+
+    /* ---- glass body ---- */
+    const bodyD = `M${cx - rimRx},${y0}
+      C${cx - rimRx},${y0 + cupH * 0.5} ${cx - botRx},${y1 - cupH * 0.3} ${cx - botRx},${y1}
+      A${botRx},${botRy} 0 0 0 ${cx + botRx},${y1}
+      C${cx + botRx},${y1 - cupH * 0.3} ${cx + rimRx},${y0 + cupH * 0.5} ${cx + rimRx},${y0}
+      A${rimRx},${rimRy} 0 0 1 ${cx - rimRx},${y0} Z`;
+    el("path", { d: bodyD }, el("clipPath", { id: "cupclip" }, svg));
+    el("path", { d: bodyD, fill: glass }, svg);
+
+    /* ---- the coffee ---- */
+    const inner = (y1 - 6) - (y0 + rimRy + 2);
+    const lv = clamp01(level);
+    const surf = (y1 - 6) - inner * lv;
+    const sRx = halfW(surf) - 1.5, sRy = ellRy(surf);
+
+    const wet = el("g", { "clip-path": "url(#cupclip)" }, svg);
+    // The rise is a keyframe animation running BACKWARDS-filled, so the cup's
+    // resting state is full: it animates up from empty if it can, and if the
+    // browser runs no animation at all it is simply full. A transition, or a
+    // freeze-filled SMIL, fails the other way -- an empty cup forever.
+    const lift = el("g", {}, wet);
+    if (!still) {
+      lift.style.setProperty("--drop", `${inner * lv}px`);
+      lift.style.animation = "pour 1.6s cubic-bezier(.22,.85,.3,1) backwards";
+    }
+    el("rect", { x: cx - rimRx - 4, y: surf, width: cupW + 8, height: y1 - surf + 14, fill: coffee }, lift);
+    el("ellipse", { cx, cy: surf, rx: sRx, ry: sRy, fill: coffee }, lift);
+    // crema, and the ring of bubbles that always collects against the glass
+    const crema = el("g", {}, lift);
+    el("ellipse", { cx, cy: surf, rx: sRx * 0.985, ry: sRy * 0.96, fill: "url(#cr)", opacity: cold ? .35 : .92 }, crema);
+    el("ellipse", { cx, cy: surf, rx: sRx * 0.985, ry: sRy * 0.96, fill: "none",
+      stroke: cold ? "rgba(255,255,255,.06)" : "rgba(255,240,220,.22)", "stroke-width": 1.2 }, crema);
+    if (!cold) for (let i = 0; i < 14; i++) {
+      const a = (i / 14) * Math.PI * 2, rr = 0.68 + (i % 3) * 0.1;
+      el("circle", { cx: cx + Math.cos(a) * sRx * rr, cy: surf + Math.sin(a) * sRy * rr,
+        r: 0.9 + (i % 3) * 0.5, fill: "#fff", opacity: .16 }, crema);
+    }
+    if (!still) crema.style.animation = "cremaIn .8s ease 1.15s backwards";
+    // the pour's impact: two rings spreading across the surface
+    if (!still) for (let i = 0; i < 2; i++) {
+      const r = el("ellipse", { cx, cy: surf, rx: sRx * 0.2, ry: sRy * 0.2, fill: "none",
+        stroke: cream, "stroke-width": 1.2, opacity: 0 }, lift);
+      r.style.transformOrigin = `${cx}px ${surf}px`;
+      r.style.animation = `ripple 1.4s ease-out ${0.35 + i * 0.5}s 2`;
+    }
+
+    /* ---- the stream ---- */
+    if (!still) {
+      const stream = el("g", { opacity: 0 }, svg);
+      stream.style.animation = "sway 1.5s ease-in-out infinite, streamlife 1.9s linear forwards";
+      const wTop = Math.max(4, cupW * 0.05), wBot = wTop * 0.55;
+      const sp = el("path", { d: `M${cx - wTop / 2},${coneBot} C${cx - wTop / 2},${coneBot + (surf - coneBot) * .6} ${cx - wBot / 2},${surf - 20} ${cx - wBot / 2},${surf}
+                                  L${cx + wBot / 2},${surf} C${cx + wBot / 2},${surf - 20} ${cx + wTop / 2},${coneBot + (surf - coneBot) * .6} ${cx + wTop / 2},${coneBot} Z`,
+        fill: coffee }, stream);
+      sp.style.transformOrigin = `${cx}px ${coneBot}px`;
+      sp.style.animation = "streamin .25s ease-out";
+      el("path", { d: `M${cx - wTop * 0.12},${coneBot + 4} L${cx - wBot * 0.12},${surf - 6}`, stroke: cream,
+        "stroke-width": 1, opacity: .35, "stroke-linecap": "round" }, stream);
+      const splash = el("g", { opacity: 0 }, svg);
+      splash.style.animation = "streamlife 1.9s linear forwards";
+      for (let i = 0; i < 6; i++) {
+        const d = el("circle", { cx, cy: surf - 2, r: 1.4 + (i % 3) * 0.7, fill: cream, opacity: 0 }, splash);
+        d.style.setProperty("--dx", `${(i - 2.5) * (cupW * 0.1)}px`);
+        d.style.animation = `splash .8s ease-out ${0.3 + i * 0.12}s infinite`;
+      }
+    }
+
+    /* ---- glass on top of the coffee: rim, highlight, target line ---- */
+    const ty = (y1 - 6) - inner * clamp01(target);
+    el("ellipse", { cx, cy: ty, rx: halfW(ty) - 1, ry: ellRy(ty), fill: "none", stroke: cream,
+      "stroke-width": 1.4, "stroke-dasharray": "4 5", opacity: .75 }, svg);
+    text(svg, cx - halfW(ty) - 6, ty + 3, "target", { fill: cream, size: 10.5, weight: 600, anchor: "end" });
+
+    el("path", { d: bodyD, fill: "none", stroke: ink, "stroke-width": 2, "stroke-linejoin": "round" }, svg);
+    el("ellipse", { cx, cy: y0, rx: rimRx, ry: rimRy, fill: "none", stroke: ink, "stroke-width": 2 }, svg);
+    el("path", { d: `M${cx - rimRx},${y0} A${rimRx},${rimRy} 0 0 1 ${cx + rimRx},${y0}`, fill: "none",
+      stroke: cream, "stroke-width": 1.6, opacity: .5 }, svg);          // lit top edge
+    el("path", { d: `M${cx - rimRx * 0.78},${y0 + cupH * 0.14} C${cx - rimRx * 0.86},${y0 + cupH * 0.4} ${cx - botRx * 0.8},${y0 + cupH * 0.62} ${cx - botRx * 0.72},${y0 + cupH * 0.8}`,
+      fill: "none", stroke: "#fff", "stroke-width": 3, opacity: .1, "stroke-linecap": "round" }, svg);   // specular
+    // handle
+    el("path", { d: `M${cx + rimRx - 2},${y0 + cupH * 0.24} q${cupW * 0.34},${cupH * 0.04} ${cupW * 0.27},${cupH * 0.28}
+                     q-${cupW * 0.015},${cupH * 0.2} -${cupW * 0.29},${cupH * 0.18}`,
+      fill: "none", stroke: ink, "stroke-width": 2.4, "stroke-linecap": "round" }, svg);
+    // it sits on something
+    el("ellipse", { cx, cy: y1 + 7, rx: cupW * 0.62, ry: 7, fill: "#000", opacity: .35, filter: "url(#soft)" }, svg);
+
+    /* ---- steam ---- */
+    if (!cold && lv >= target) {
+      [-0.26, 0, 0.26].forEach((off, i) => {
+        const sx = cx + cupW * off;
+        const p = el("path", { d: `M${sx},${y0 - rimRy - 4} q12,-15 0,-28 q-12,-15 0,-26`, fill: "none",
+          stroke: cream, "stroke-width": 2.4, "stroke-linecap": "round", opacity: still ? .22 : 0,
+          filter: "url(#soft)" }, svg);
+        if (!still) { p.style.transformOrigin = `${sx}px ${y0}px`; p.style.animation = `steam 3.${i * 3}s ease-in-out ${1.8 + i * 0.55}s infinite`; }
+      });
+    }
+
+    /* ---- how much of your window is left ---- */
+    const aR = cupW * 0.92, aY = y1 + 20;
+    const arc = (frac) => {
+      const a0 = Math.PI * 0.12, a1 = Math.PI * 0.88;
+      const e = a0 + (a1 - a0) * clamp01(frac);
+      return `M${cx - aR * Math.cos(a0)},${aY + aR * Math.sin(a0) * 0.38} A${aR},${aR * 0.38} 0 0 1 ${cx - aR * Math.cos(e)},${aY + aR * Math.sin(e) * 0.38}`;
+    };
+    const ringCol = cold ? css("--critical") : ringFrac > 0.35 ? css("--good") : ringFrac > 0.12 ? css("--warning") : css("--critical");
+    el("path", { d: arc(1), fill: "none", stroke: css("--border"), "stroke-width": 3, "stroke-linecap": "round" }, svg);
+    if (ringFrac > 0.01) el("path", { d: arc(ringFrac), fill: "none", stroke: ringCol, "stroke-width": 3, "stroke-linecap": "round" }, svg);
+    text(svg, cx, aY + 30, cold ? "your window has closed" : `${daysLeft} days of window left`,
+      { fill: ringCol, size: 11.5, weight: 600, anchor: "middle" });
+  });
 }
 
 /* ============================= the scale bar ============================= */
@@ -455,6 +668,12 @@ function renderDecay(series, days, weakest) {
 
     const list = shown();
     const ordered = [...list].sort((a, b) => (a.concept === weakest ? 1 : b.concept === weakest ? -1 : 0));
+    const lead = list.find((s2) => s2.concept === (state.isolate || weakest));
+    if (lead) {
+      const fill = fadeUnder(svg, "decayfill", css("--series-1"), .26);
+      el("path", { d: line(lead.points.map((p) => [X(p.day), Y(p.recall)])) +
+        ` L${X(days)},${box.y + box.h} L${box.x},${box.y + box.h} Z`, fill, stroke: "none" }, svg);
+    }
     for (const s of ordered) {
       const isWeak = s.concept === weakest || state.isolate === s.concept;
       animate(el("path", { d: line(s.points.map((p) => [X(p.day), Y(p.recall)])), fill: "none",
@@ -464,6 +683,7 @@ function renderDecay(series, days, weakest) {
     const weak = list.find((s) => s.concept === (state.isolate || weakest));
     if (weak) {
       const last = weak.points[weak.points.length - 1];
+      el("circle", { cx: X(last.day), cy: Y(last.recall), r: 9, fill: css("--series-1"), opacity: .18 }, svg);
       el("circle", { cx: X(last.day), cy: Y(last.recall), r: 4.5, fill: css("--series-1"),
         stroke: css("--surface-1"), "stroke-width": 2 }, svg);
       text(svg, X(last.day) - 10, Y(last.recall) - 10, scaleWord(band(last.recall, days).mid) + " left",
@@ -527,11 +747,11 @@ function renderDecay(series, days, weakest) {
 function renderConcepts(concepts, days, target) {
   chart($("#conceptChart"), (svg, W, H) => {
     const rows = concepts.length;
-    const rowH = Math.max(26, Math.min(46, (H - 24) / rows));
+    const rowH = Math.max(24, Math.min(44, (H - 30) / rows));
     const labelW = Math.min(150, W * 0.36), barX = labelW + 10, barW = W - labelW - 78;
     if (barW < 40) return;
     concepts.forEach((c, i) => {
-      const y = 10 + i * rowH, mid = y + rowH / 2;
+      const y = 14 + i * rowH, mid = y + rowH / 2;
       const b = band(c.recall, days);
       const name = c.concept.length > 22 ? c.concept.slice(0, 21) + "…" : c.concept;
       text(svg, labelW, mid + 4, name, { anchor: "end", fill: css("--text-secondary"), size: 12.5 });
@@ -540,9 +760,15 @@ function renderConcepts(concepts, days, target) {
       const x1 = barX + b.lo * barW, x2 = barX + b.hi * barW;
       el("path", { d: hBarPath(barX, mid - 7, Math.max(3, x1 - barX), 14, 5), fill: css("--series-1"), opacity: .45 }, svg);
       el("rect", { x: x1, y: mid - 7, width: Math.max(2, x2 - x1), height: 14, fill: css("--series-1") }, svg);
-      // target tick
-      el("line", { x1: barX + target * barW, x2: barX + target * barW, y1: mid - 11, y2: mid + 11,
-        stroke: css("--crema"), "stroke-width": 1.5, opacity: .8 }, svg);
+      // the ends of the range, and the target as one line down the whole column
+      for (const ex of [x1, x2]) el("line", { x1: ex, x2: ex, y1: mid - 10, y2: mid + 10,
+        stroke: css("--crema"), "stroke-width": 1.5, opacity: .55 }, svg);
+      if (i === 0) {
+        el("line", { x1: barX + target * barW, x2: barX + target * barW, y1: 15, y2: 15 + rows * rowH,
+          stroke: css("--crema"), "stroke-width": 1.2, "stroke-dasharray": "3 4", opacity: .5 }, svg);
+        text(svg, barX + target * barW + 4, 11, `target ${pct0(target)}`,
+          { anchor: "start", fill: css("--crema"), size: 10, weight: 600 });
+      }
       text(svg, barX + barW + 8, mid + 4,
         state.exact ? pct(c.recall) : `${pct0(b.lo)}–${pct0(b.hi)}`,
         { fill: css("--text-primary"), size: 12, weight: 600 });
@@ -574,12 +800,20 @@ function renderCeiling(ceiling, days, target) {
     host.dataset.axisFloor = Math.round(box.min * 100);
 
     const dl = ceiling.latest_start_day;
-    if (dl !== null && dl < days)
-      el("rect", { x: X(dl), y: box.y, width: box.x + box.w - X(dl), height: box.h, fill: css("--critical"), opacity: .09 }, svg);
+    if (dl !== null && dl < days) {
+      el("rect", { x: X(dl), y: box.y, width: box.x + box.w - X(dl), height: box.h, fill: css("--critical"), opacity: .08 }, svg);
+      el("rect", { x: X(dl), y: box.y, width: box.x + box.w - X(dl), height: box.h,
+        fill: hatch(svg, "gone", css("--critical")) }, svg);
+      text(svg, Math.min(box.x + box.w - 6, (X(dl) + box.x + box.w) / 2 + 62), box.y + box.h - 10,
+        "out of reach at any effort", { anchor: "end", fill: css("--critical"), size: 11, weight: 600 });
+    }
 
     el("line", { x1: box.x, x2: box.x + box.w, y1: Y(target), y2: Y(target), stroke: css("--good"), "stroke-width": 1.5 }, svg);
     text(svg, box.x + 8, Y(target) + 15, `your target · ${pct0(target)}`, { fill: css("--good"), size: 11, weight: 600 });
 
+    el("path", { d: line(curve.map((p) => [X(p.start_day), Y(p.best_possible)])) +
+      ` L${X(curve[curve.length - 1].start_day)},${box.y + box.h} L${box.x},${box.y + box.h} Z`,
+      fill: fadeUnder(svg, "ceilfill", css("--series-1"), .22), stroke: "none" }, svg);
     animate(el("path", { d: line(curve.map((p) => [X(p.start_day), Y(p.best_possible)])), fill: "none",
       stroke: css("--series-1"), "stroke-width": 2.5, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg));
 
@@ -655,19 +889,26 @@ function renderPlan(plan, days) {
     text(svg, Math.max(box.x + 4, wx - 12), box.y + 14,
       `all ${sessions.length} evenings sit here — day ${firstDay} to ${lastDay}`,
       { anchor: wx - 12 > box.x + 140 ? "end" : "start", fill: css("--text-secondary"), size: 11.5, weight: 600 });
+    const planFill = (() => {
+      const d = el("defs", {}, svg);
+      const g = el("linearGradient", { id: "planbar", x1: "0%", y1: "0%", x2: "0%", y2: "100%" }, d);
+      el("stop", { offset: "0%", "stop-color": css("--crema"), "stop-opacity": .95 }, g);
+      el("stop", { offset: "100%", "stop-color": css("--series-1"), "stop-opacity": .9 }, g);
+      return "url(#planbar)";
+    })();
     const slot = box.w / Math.max(days, 1);
     const barW = Math.max(5, Math.min(14, slot - 3));
     for (const s of sessions) {
       const x = box.x + (s.day / days) * box.w - barW / 2;
       const h = Math.max(2, (s.minutes / maxMin) * box.h);
-      const p = el("path", { d: barPath(x, box.y + box.h - h, barW, h, 4), fill: css("--series-1") }, svg);
+      const p = el("path", { d: barPath(x, box.y + box.h - h, barW, h, 4), fill: planFill }, svg);
       const hit = el("rect", { x: x - 4, y: box.y, width: barW + 8, height: box.h, fill: "transparent" }, svg);
       hit.addEventListener("pointermove", (e) => {
         p.setAttribute("fill", css("--crema"));
         showTip(e, `day ${s.day}`, `${Math.round(s.minutes)} min · ${s.cards} facts`,
           s.concepts.slice(0, 3).map((c) => ({ label: c, value: "" })));
       });
-      hit.addEventListener("pointerleave", () => { p.setAttribute("fill", css("--series-1")); hideTip(); });
+      hit.addEventListener("pointerleave", () => { p.setAttribute("fill", planFill); hideTip(); });
     }
     axis(svg, box);
     el("line", { x1: box.x + box.w, x2: box.x + box.w, y1: box.y, y2: box.y + box.h, stroke: css("--critical"), "stroke-width": 2 }, svg);
@@ -908,7 +1149,7 @@ function daysToExam() {
 
 /* --------------------------------- router --------------------------------- */
 const SCREENS = {
-  home:       ["Today", "Where you actually stand, on one dial."],
+  home:       ["Today", "Where you actually stand, in one cup."],
   syllabus:   ["My syllabus", "What you're studying, and how well you know it. Everything else is computed from this."],
   forecast:   ["What I'll forget", "Your syllabus, projected to the morning of the exam."],
   deadline:   ["My cutoff", "The last day you can start and still get there."],
@@ -965,7 +1206,9 @@ function renderAll() {
   $("#focusDot").style.display = timer.running ? "block" : "none";
 
   /* --- the cup --- */
-  renderCup(state.exact ? forecast.overall_recall : overall.b.mid, target, gone ? 0 : dl / days, gone);
+  const shown = state.exact ? forecast.overall_recall : overall.b.mid;
+  renderCup(shown, target, gone ? 0 : dl / days, gone, gone ? 0 : dl);
+  renderGauge(shown, target, gone ? 0 : dl / days, gone);
   $("#cupWords").textContent = state.exact ? pct(forecast.overall_recall) : overall.head;
   $("#cupRange").innerHTML = `of your syllabus — <b>${scaleWord(overall.b.mid)}</b> — on exam morning, if you did nothing between now and then.<br>` + overall.sub;
   renderScale($("#cupScale"), overall.b, target);
@@ -1179,9 +1422,15 @@ function fmtClock(s) {
   s = Math.max(0, Math.ceil(s));
   return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 }
+let dialSec = null, dialState = "";
 function renderDial() {
   const frac = 1 - timer.left / (timer.minutes * 60);
-  chart($("#timerRing"), (svg, W, H) => {
+  const sec = Math.ceil(timer.left), st = timer.running ? "run" : "hold";
+  // The clock text updates four times a second; the drawing only needs to when
+  // the second changes -- and rebuilding it more often restarts its animations.
+  const redraw = sec !== dialSec || st !== dialState;
+  dialSec = sec; dialState = st;
+  if (redraw) chart($("#timerRing"), (svg, W, H) => {
     const cx = W / 2, cy = H / 2, R = Math.min(W, H) / 2 - 12;
     const C = 2 * Math.PI * R;
     el("circle", { cx, cy, r: R, fill: "none", stroke: css("--border"), "stroke-width": 6 }, svg);
@@ -1190,12 +1439,19 @@ function renderDial() {
     el("circle", { cx, cy, r: R - 5 }, clip);
     const g = el("g", { "clip-path": "url(#dialclip)" }, svg);
     const top = cy + R - 2 * R * clamp01(frac);
-    el("rect", { x: cx - R, y: top, width: 2 * R, height: 2 * R, fill: css("--series-1"), opacity: .17 }, g);
-    el("line", { x1: cx - R, x2: cx + R, y1: top, y2: top, stroke: css("--crema"), "stroke-width": 1.5, opacity: .5 }, g);
+    // the cup fills as the session runs, wave and all
+    const amp = 4, seg = R / 2;
+    let w = `M${cx - R * 2},${top}`;
+    for (let i = 0; i < 8; i++) w += ` q${seg / 2},${(i % 2 ? 1 : -1) * amp} ${seg},0`;
+    w += ` L${cx + R * 2},${cy + R} L${cx - R * 2},${cy + R} Z`;
+    const slide = el("g", {}, g);
+    if (!matchMedia("(prefers-reduced-motion: reduce)").matches && timer.running)
+      slide.style.animation = "slosh 6s linear infinite";
+    el("path", { d: w, fill: css("--series-1"), opacity: .17 }, slide);
+    el("path", { d: w.replace(`M${cx - R * 2},${top}`, `M${cx - R * 2},${top + 2}`), fill: css("--crema"), opacity: .08 }, slide);
     el("circle", { cx, cy, r: R, fill: "none", stroke: css("--series-1"), "stroke-width": 6, "stroke-linecap": "round",
       transform: `rotate(-90 ${cx} ${cy})`, "stroke-dasharray": `${C * clamp01(frac)} ${C}` }, svg);
   });
-  repaint($("#timerRing"));
   $("#timerClock").textContent = fmtClock(timer.left);
   $("#timerState").textContent = timer.running ? "brewing" : timer.left === timer.minutes * 60 ? "ready to brew" : "paused";
   $("#timerStart").textContent = timer.running ? "Pause" : timer.left === timer.minutes * 60 ? "Start brewing" : "Resume";
@@ -1284,6 +1540,18 @@ async function readSyllabus({ seedRatings = false } = {}) {
 }
 
 /* ================================== boot ================================== */
+// the pointer position feeds the hero card's highlight
+{
+  let queued = false, px = 0, py = 0;
+  const glint = document.querySelector(".card.glint");
+  if (glint) glint.addEventListener("pointermove", (e) => {
+    const r = glint.getBoundingClientRect();
+    px = ((e.clientX - r.left) / r.width) * 100; py = ((e.clientY - r.top) / r.height) * 100;
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => { glint.style.setProperty("--mx", px + "%"); glint.style.setProperty("--my", py + "%"); queued = false; });
+  });
+}
 $("#bannerClose").addEventListener("click", clearFail);
 addEventListener("error", (e) => fail("Something in the interface broke.", e.error || e.message));
 addEventListener("unhandledrejection", (e) => fail("Something in the interface broke.", e.reason));

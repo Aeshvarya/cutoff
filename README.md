@@ -70,8 +70,10 @@ of Cutoff is that the number has something behind it.
 ## The interface
 
 Nine screens rather than one long page: **Today** (your whole semester as one
-gauge — your score on exam morning, and a ring showing how much of your window
-is left), **My syllabus**, **What I'll forget**, **My cutoff**, **The plan**,
+cup — it pours itself to what you'd hold on exam morning, the dashed ring on the
+glass is your target, and the arc beneath it is how much of your window is
+left), **My syllabus**, **What I'll forget** (the same figure as a gauge, beside
+the headline), **My cutoff**, **The plan**,
 **Two exams**, **Focus**, **How it works**, **Can I trust it?**
 
 The **Focus** screen is a session timer that finishes in cups, and it knows what
