@@ -1,24 +1,30 @@
 /* Cutoff — client.
-   Charts are hand-drawn SVG. Every number on screen comes from the API, which
-   computes it from the committed model. Nothing here is hardcoded for a demo. */
+   Charts are hand-drawn SVG, sized to their container rather than to a fixed
+   viewBox, so the app fills whatever window it is opened in.
+
+   Two rules this file keeps:
+   1. Every number comes from the API, which computes it from the committed
+      model. Nothing here is hardcoded for a demo.
+   2. Numbers are shown as a RANGE by default. The range is the model's own
+      measured error at that horizon, read off /api/calibration — not a
+      decoration, and not a guess. "exact figures" in the top bar shows the raw
+      output instead. */
 
 const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
 const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const clamp01 = (x) => Math.max(0, Math.min(1, x));
 const pct = (x) => (x * 100).toFixed(1) + "%";
 const pct0 = (x) => Math.round(x * 100) + "%";
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("cutoff." + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("cutoff." + k, JSON.stringify(v)); } catch { /* private mode */ } },
+};
 
-const CARDS_PER_COURSE = 75;   // used only for a subject you type in by hand
-
-/* A syllabus line is a topic, not a fact. "Entropy, Clausius inequality,
-   reversibility" is three topics and a good many more cards. Rather than guess
-   silently, Cutoff exposes the multiplier and shows the total it produces --
-   this is the one number on the site the student supplies rather than the model,
-   and it is labelled that way on screen. */
+const CARDS_PER_COURSE = 75;   // only for a subject typed in by hand
 const DEFAULT_DENSITY = 6;
 const density = () => Math.max(1, Math.min(30, +($("#density")?.value) || DEFAULT_DENSITY));
 
-/* Ratings for the sample semester only, so a first-time visitor sees a real
-   spread instead of eight identical subjects. Your own syllabus starts neutral. */
 const SAMPLE_RATINGS = {
   "Chemical Engineering Thermodynamics": 2, "Fluid Mechanics": 1, "Heat Transfer": 3,
   "Mass Transfer": 3, "Chemical Reaction Engineering": 2, "Process Control": 4,
@@ -35,8 +41,6 @@ const DEFAULT_COURSES = [
   { name: "Chemical Technology", rating: 4, n: CARDS_PER_COURSE },
 ];
 
-/* A realistic semester, so the paste box can be demonstrated without asking a
-   judge to type one. It is read by exactly the same endpoint as your own. */
 const SAMPLE_SYLLABUS = `CHE 201 — Chemical Engineering Thermodynamics
 Unit 1: Laws and state functions
 Zeroth law, first law, closed and open systems; internal energy, enthalpy, heat capacity
@@ -85,11 +89,59 @@ Sulphuric acid manufacture, contact process
 Ammonia synthesis, Haber process, catalyst regeneration
 Petroleum refining, distillation, cracking, reforming
 Polymers, polymerisation routes, industrial safety`;
+
 const GRADE_WORDS = { 1: "gone", 2: "shaky", 3: "solid", 4: "cold" };
 
-const state = { courses: structuredClone(DEFAULT_COURSES), cards: [], forecast: null, ceiling: null, plan: null };
+const state = {
+  courses: structuredClone(DEFAULT_COURSES),
+  cards: [], forecast: null, ceiling: null, plan: null, curves: null,
+  days: 87, target: 0.9, cap: 40,
+  isolate: null,
+  exact: store.get("exact", false),
+};
 
-/* ---------------------------------------------------------------- svg utils */
+/* =====================================================================
+   The honesty layer: how wrong is the model at this range?
+   Filled from /api/calibration. Until it lands we fall back to the ECE
+   published in the README, and every band says which it used.
+   ===================================================================== */
+const CAL = { ece: 0.025, byHorizon: null, loaded: false };
+const HORIZON_MAX_DAYS = [7, 28, 90, Infinity];
+
+function biasAt(days) {
+  if (!CAL.byHorizon || !CAL.byHorizon.length) return 0;
+  const i = HORIZON_MAX_DAYS.findIndex((d) => days <= d);
+  const row = CAL.byHorizon[Math.min(i < 0 ? CAL.byHorizon.length - 1 : i, CAL.byHorizon.length - 1)];
+  return row.predicted - row.actual;          // positive = overconfident
+}
+
+/** A model output turned into the range we are willing to stand behind. */
+function band(p, days = state.days) {
+  const bias = biasAt(days), e = CAL.ece;
+  const mid = clamp01(p - bias);
+  return { raw: p, mid, lo: clamp01(mid - e), hi: clamp01(mid + e), bias, e };
+}
+
+const SCALE_WORDS = [
+  [0.93, "nearly all of it"], [0.8, "most of it"], [0.65, "more than half"],
+  [0.5, "about half"], [0.35, "less than half"], [0.2, "a fraction of it"],
+  [0, "almost none of it"],
+];
+const scaleWord = (p) => SCALE_WORDS.find(([t]) => p >= t)[1];
+const inTen = (p) => `about ${Math.round(p * 10)} in 10`;
+
+/** The one function every headline goes through. */
+function figure(p, days) {
+  const b = band(p, days);
+  if (state.exact) return { head: pct(b.raw), sub: `raw model output. Measured bias at this range is ${(b.bias * 100).toFixed(1)} points, so the honest read is ${pct0(b.mid)}.`, b };
+  return {
+    head: inTen(b.mid),
+    sub: `somewhere between <b>${pct0(b.lo)}</b> and <b>${pct0(b.hi)}</b> — that width is the model's own measured error at this range, not a guess.`,
+    b,
+  };
+}
+
+/* =========================== svg + chart engine =========================== */
 const NS = "http://www.w3.org/2000/svg";
 function el(tag, attrs = {}, parent) {
   const n = document.createElementNS(NS, tag);
@@ -97,588 +149,572 @@ function el(tag, attrs = {}, parent) {
   if (parent) parent.appendChild(n);
   return n;
 }
-function svgRoot(host, w, h) {
-  host.classList.remove("loading");
-  host.textContent = "";
-  const s = el("svg", { viewBox: `0 0 ${w} ${h}`, role: "img" });
-  host.appendChild(s);
-  return s;
+function text(svg, x, y, s, o = {}) {
+  const t = el("text", { x, y, fill: o.fill || css("--text-muted"), "font-size": o.size || 11,
+    "text-anchor": o.anchor || "start", "font-weight": o.weight || 400, ...(o.attrs || {}) }, svg);
+  t.textContent = s;
+  return t;
 }
-/** Rounded only on the data end, anchored to the baseline. */
-function barPath(x, y, w, h, r) {
-  r = Math.min(r, w / 2, h);
-  return `M${x},${y + h} L${x},${y + r} Q${x},${y} ${x + r},${y} L${x + w - r},${y} Q${x + w},${y} ${x + w},${y + r} L${x + w},${y + h} Z`;
-}
+const line = (pts) => pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(2) + "," + p[1].toFixed(2)).join(" ");
 function hBarPath(x, y, w, h, r) {
-  r = Math.min(r, h / 2, w);
+  r = Math.min(r, h / 2, Math.max(w, 0.01));
   return `M${x},${y} L${x + w - r},${y} Q${x + w},${y} ${x + w},${y + r} L${x + w},${y + h - r} Q${x + w},${y + h} ${x + w - r},${y + h} L${x},${y + h} Z`;
 }
-/** Let a path draw itself in.
-    Fails OPEN: the dash offset is only applied once we know the transition will
-    clear it, so a path can never be left hidden by its own animation. */
+function barPath(x, y, w, h, r) {
+  r = Math.min(r, w / 2, Math.max(h, 0.01));
+  return `M${x},${y + h} L${x},${y + r} Q${x},${y} ${x + r},${y} L${x + w - r},${y} Q${x + w},${y} ${x + w},${y + r} L${x + w},${y + h} Z`;
+}
+
+/** Draw into a host element, and redraw it whenever the host resizes.
+    The viewBox is in real pixels, so 11px text is 11px whatever the window. */
+function chart(host, draw) {
+  if (!host) return;
+  host.classList.remove("loading");
+  host._draw = draw;
+  if (!host._ro) {
+    host._ro = new ResizeObserver(() => paint(host));
+    host._ro.observe(host);
+  } else paint(host);
+}
+function paint(host) {
+  const w = Math.round(host.clientWidth), h = Math.round(host.clientHeight);
+  if (!w || !h || !host._draw) return;
+  if (host._w === w && host._h === h && host._painted) return;
+  host._w = w; host._h = h; host._painted = true;
+  host.textContent = "";
+  const svg = el("svg", { viewBox: `0 0 ${w} ${h}`, role: "img", "aria-label": host.dataset.label || "chart" });
+  svg.style.fontFamily = css("--font");
+  host.appendChild(svg);
+  try { host._draw(svg, w, h); } catch (e) { console.error("chart", host.id, e); }
+}
+const repaint = (host) => { if (host) { host._painted = false; paint(host); } };
+
+/** Let a path draw itself in. Fails OPEN — a path is never left hidden. */
 function animate(path) {
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return path;
-  let length = 0;
-  try { length = path.getTotalLength(); } catch { return path; }
-  if (!length || !Number.isFinite(length)) return path;
-
-  path.style.strokeDasharray = length;
-  path.style.strokeDashoffset = length;
+  let len = 0;
+  try { len = path.getTotalLength(); } catch { return path; }
+  if (!len || !Number.isFinite(len)) return path;
+  path.style.strokeDasharray = len;
+  path.style.strokeDashoffset = len;
   requestAnimationFrame(() => requestAnimationFrame(() => {
-    path.style.transition = "stroke-dashoffset .85s cubic-bezier(.22,.61,.36,1)";
+    path.style.transition = "stroke-dashoffset .8s cubic-bezier(.22,.61,.36,1)";
     path.style.strokeDashoffset = "0";
   }));
-  // Belt and braces: if the frames never arrive (a background tab, a headless
-  // renderer), clear it anyway so the line is simply there.
   setTimeout(() => { path.style.strokeDashoffset = "0"; }, 1200);
   return path;
 }
 
-/** Count a figure up to its value. Purely decorative, so it degrades to the
-    final number if anything goes wrong or motion is unwanted. */
-function countUp(node, value, format) {
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches) { node.textContent = format(value); return; }
-  const start = performance.now(), dur = 900;
-  const step = (now) => {
-    const t = Math.min(1, (now - start) / dur);
-    const eased = 1 - Math.pow(1 - t, 3);
-    node.textContent = format(value * eased);
-    if (t < 1) requestAnimationFrame(step);
-  };
-  requestAnimationFrame(step);
-}
-
-function line(points) {
-  return points.map((p, i) => (i ? "L" : "M") + p[0].toFixed(2) + "," + p[1].toFixed(2)).join(" ");
-}
-
+/* =============================== tooltip =============================== */
 const tip = $("#tip");
-function showTip(evt, title, value, extra) {
-  tip.innerHTML = `<div class="th">${title}</div><div class="tv">${value}</div>` +
-    (extra ? `<div style="color:var(--text-muted);margin-top:2px">${extra}</div>` : "");
+function showTip(evt, title, value, rows = []) {
+  tip.textContent = "";
+  const th = document.createElement("div"); th.className = "th"; th.textContent = title;
+  const tv = document.createElement("div"); tv.className = "tv"; tv.textContent = value;
+  tip.append(th, tv);
+  for (const r of rows) {
+    const d = document.createElement("div"); d.className = "tr";
+    if (r.colour) { const k = document.createElement("span"); k.className = "k"; k.style.background = r.colour; d.append(k); }
+    const nm = document.createElement("span"); nm.textContent = r.label;          // labels are untrusted data
+    const v = document.createElement("b"); v.textContent = r.value;
+    d.append(nm, v); tip.append(d);
+  }
   tip.style.opacity = 1;
-  const pad = 14;
+  const pad = 14, w = 250;
   let x = evt.clientX + pad, y = evt.clientY - pad;
-  if (x + 240 > innerWidth) x = evt.clientX - 240;
+  if (x + w > innerWidth) x = evt.clientX - w;
   if (y < 10) y = 10;
-  tip.style.left = x + "px";
-  tip.style.top = y + "px";
+  if (y + tip.offsetHeight > innerHeight - 8) y = innerHeight - tip.offsetHeight - 8;
+  tip.style.left = x + "px"; tip.style.top = y + "px";
 }
 const hideTip = () => (tip.style.opacity = 0);
 
-/* Recessive hairline grid + axes. Solid, one shade off the surface. */
-function grid(svg, box, yTicks, fmt) {
-  for (const t of yTicks) {
+/** Recessive hairline grid. */
+function grid(svg, box, ticks, fmt) {
+  for (const t of ticks) {
     const y = box.y + box.h - (t - box.min) / (box.max - box.min) * box.h;
     el("line", { x1: box.x, x2: box.x + box.w, y1: y, y2: y, stroke: css("--border"), "stroke-width": 1 }, svg);
-    el("text", { x: box.x - 9, y: y + 4, "text-anchor": "end", fill: css("--text-muted"),
-      "font-size": 11, "font-family": css("--font") }, svg).textContent = fmt(t);
+    text(svg, box.x - 8, y + 4, fmt(t), { anchor: "end" });
   }
 }
+const axis = (svg, box) => el("line", { x1: box.x, x2: box.x + box.w, y1: box.y + box.h, y2: box.y + box.h,
+  stroke: css("--border-strong"), "stroke-width": 1 }, svg);
 
-/* ------------------------------------------------------- 1. decay curves */
-function renderDecay(series, daysToExam, weakest) {
-  const host = $("#decayChart");
-  const W = 620, H = 300, box = { x: 44, y: 14, w: W - 60, h: H - 52, min: 0, max: 1 };
-  const svg = svgRoot(host, W, H);
-  grid(svg, box, [0, 0.25, 0.5, 0.75, 1], (t) => Math.round(t * 100) + "%");
+/* ================================ the cup ================================
+   Level    = what you'd hold on exam morning (the calibrated middle).
+   Dashes   = the target you asked for.
+   Ring     = how much of your window is left before the cutoff.
+   Steam    = you are above target. It stops when you are not.
+   Every one of those is labelled in words underneath — the cup is a picture
+   of numbers that are also written down, never the only place they appear. */
+function renderCup(level, target, ringFrac, cold) {
+  chart($("#cupChart"), (svg, W, H) => {
+    const size = Math.min(W, H * 0.98);
+    const cx = W / 2, cy = H / 2;
+    const R = size / 2 - 6;                      // the urgency ring
+    const cupW = R * 1.16, cupH = R * 1.2;
+    const x0 = cx - cupW / 2, y0 = cy - cupH * 0.46, y1 = y0 + cupH;
+    const taper = cupW * 0.1;
 
-  const X = (d) => box.x + (d / daysToExam) * box.w;
-  const Y = (r) => box.y + box.h - r * box.h;
+    // --- ring ---
+    const ringCol = cold ? css("--critical") : ringFrac > 0.35 ? css("--good") : ringFrac > 0.12 ? css("--warning") : css("--critical");
+    const C = 2 * Math.PI * R;
+    el("circle", { cx, cy, r: R, fill: "none", stroke: css("--border"), "stroke-width": 3 }, svg);
+    const arc = el("circle", { cx, cy, r: R, fill: "none", stroke: ringCol, "stroke-width": 3,
+      "stroke-linecap": "round", transform: `rotate(-90 ${cx} ${cy})`,
+      "stroke-dasharray": `${C * clamp01(ringFrac)} ${C}` }, svg);
+    arc.style.transition = "stroke-dasharray .6s ease";
 
-  // Exam day. A solid rule with a label, not a dash — it is an event, not a grid line.
-  el("line", { x1: X(daysToExam), x2: X(daysToExam), y1: box.y - 6, y2: box.y + box.h,
-    stroke: css("--critical"), "stroke-width": 2 }, svg);
-  el("text", { x: X(daysToExam), y: box.y - 12, "text-anchor": "end", fill: css("--critical"),
-    "font-size": 11, "font-weight": 600, "letter-spacing": ".06em",
-    "font-family": css("--font") }, svg).textContent = "EXAM DAY";
+    // --- saucer ---
+    el("ellipse", { cx, cy: y1 + 16, rx: cupW * 0.78, ry: 7, fill: "none", stroke: css("--border-strong"), "stroke-width": 1.5 }, svg);
 
-  // Context series first, so the emphasised one sits on top.
-  const ordered = [...series].sort((a, b) => (a.concept === weakest ? 1 : b.concept === weakest ? -1 : 0));
-  for (const s of ordered) {
-    const isWeak = s.concept === weakest;
-    animate(el("path", {
-      d: line(s.points.map((p) => [X(p.day), Y(p.recall)])),
-      fill: "none",
-      stroke: isWeak ? css("--series-2") : css("--context"),
-      "stroke-width": isWeak ? 2.5 : 1.5,
-      "stroke-linecap": "round",
-      opacity: isWeak ? 1 : 0.72,
-    }, svg));
-  }
+    // --- body ---
+    const body = `M${x0},${y0} L${x0 + taper},${y1 - 14} Q${x0 + taper},${y1} ${x0 + taper + 14},${y1}
+                  L${x0 + cupW - taper - 14},${y1} Q${x0 + cupW - taper},${y1} ${x0 + cupW - taper},${y1 - 14}
+                  L${x0 + cupW},${y0} Z`;
+    const clip = el("clipPath", { id: "cupclip" }, svg);
+    el("path", { d: body }, clip);
 
-  // Direct-label the endpoint of the emphasised series only.
-  const weak = series.find((s) => s.concept === weakest);
-  if (weak) {
-    const last = weak.points[weak.points.length - 1];
-    el("circle", { cx: X(last.day), cy: Y(last.recall), r: 4.5, fill: css("--series-2"),
-      stroke: css("--surface-1"), "stroke-width": 2 }, svg);
-    el("text", { x: X(last.day) - 12, y: Y(last.recall) - 11, "text-anchor": "end",
-      fill: css("--series-2"), "font-size": 13, "font-weight": 650,
-      "font-family": css("--font") }, svg).textContent = pct0(last.recall) + " on exam day";
-  }
+    // --- liquid ---
+    const inner = y1 - y0 - 10;
+    const lv = clamp01(level);
+    const surface = y1 - 6 - inner * lv;
+    const g = el("g", { "clip-path": "url(#cupclip)" }, svg);
+    el("rect", { x: x0 - 4, y: surface, width: cupW + 8, height: y1 - surface + 6,
+      fill: cold ? css("--context") : css("--series-1"), opacity: cold ? 0.55 : 0.92 }, g);
+    // crema: the lighter skin on top, and a wave so it reads as liquid
+    const amp = Math.max(2.5, cupW * 0.022);
+    const wave = (o) => {
+      let d = `M${x0 - 8},${surface + o}`;
+      for (let i = 0; i <= 8; i++) {
+        const step = (cupW + 16) / 8;
+        d += ` q${step / 2},${(i % 2 ? 1 : -1) * amp} ${step},0`;
+      }
+      return d + ` L${x0 + cupW + 8},${y1 + 8} L${x0 - 8},${y1 + 8} Z`;
+    };
+    el("path", { d: wave(0), fill: cold ? css("--context") : css("--crema"), opacity: cold ? .5 : .34 }, g);
+    if (lv > 0.02) el("path", { d: wave(3), fill: cold ? css("--context") : css("--series-1"), opacity: .9 }, g);
 
-  el("line", { x1: box.x, x2: box.x + box.w, y1: box.y + box.h, y2: box.y + box.h,
-    stroke: css("--border-strong"), "stroke-width": 1 }, svg);
-  for (const d of [0, Math.round(daysToExam / 2), daysToExam]) {
-    el("text", { x: X(d), y: box.y + box.h + 20, "text-anchor": "middle", fill: css("--text-muted"),
-      "font-size": 11, "font-family": css("--font") }, svg).textContent = d === 0 ? "today" : `day ${d}`;
-  }
+    // --- target line, drawn on the glass ---
+    const ty = y1 - 6 - inner * clamp01(target);
+    el("line", { x1: x0 - 2, x2: x0 + cupW + 2, y1: ty, y2: ty, stroke: css("--crema"),
+      "stroke-width": 1.5, "stroke-dasharray": "5 5", opacity: .85 }, svg);
+    text(svg, x0 + cupW + 8, ty + 4, "target", { fill: css("--crema"), size: 11, weight: 600 });
 
-  // Crosshair + tooltip.
-  const cross = el("line", { y1: box.y, y2: box.y + box.h, stroke: css("--border-strong"),
-    "stroke-width": 1, opacity: 0 }, svg);
-  const hit = el("rect", { x: box.x, y: box.y, width: box.w, height: box.h, fill: "transparent" }, svg);
-  hit.addEventListener("mousemove", (e) => {
-    const r = svg.getBoundingClientRect();
-    const day = Math.max(0, Math.min(daysToExam, ((e.clientX - r.left) / r.width * W - box.x) / box.w * daysToExam));
-    cross.setAttribute("x1", X(day)); cross.setAttribute("x2", X(day)); cross.setAttribute("opacity", 1);
-    const rows = series.map((s) => {
-      const p = s.points.reduce((a, b) => (Math.abs(b.day - day) < Math.abs(a.day - day) ? b : a));
-      return { c: s.concept, r: p.recall };
-    }).sort((a, b) => a.r - b.r);
-    showTip(e, `day ${Math.round(day)}`, `${pct(rows.reduce((a, b) => a + b.r, 0) / rows.length)} overall`,
-      `weakest: ${rows[0].c} at ${pct(rows[0].r)}`);
-  });
-  hit.addEventListener("mouseleave", () => { cross.setAttribute("opacity", 0); hideTip(); });
+    // --- outline + handle, on top of the liquid ---
+    el("path", { d: body, fill: "none", stroke: css("--text-secondary"), "stroke-width": 2, "stroke-linejoin": "round" }, svg);
+    el("path", { d: `M${x0 + cupW - 2},${y0 + inner * 0.22} q${cupW * 0.3},${inner * 0.06} ${cupW * 0.24},${inner * 0.28}
+                     q-${cupW * 0.02},${inner * 0.2} -${cupW * 0.26},${inner * 0.2}`,
+      fill: "none", stroke: css("--text-secondary"), "stroke-width": 2, "stroke-linecap": "round" }, svg);
 
-  $("#decayLegend").innerHTML =
-    `<li><span class="swatch" style="background:${css("--series-2")}"></span>${weakest} — weakest</li>` +
-    `<li><span class="swatch" style="background:${css("--context")}"></span>your other subjects</li>` +
-    `<li><span class="swatch" style="background:${css("--critical")}"></span>exam day</li>`;
-}
-
-/* --------------------------------------------------- 2. concept ranking */
-function renderConcepts(concepts) {
-  const host = $("#conceptChart");
-  const rowH = 34, W = 420, H = concepts.length * rowH + 12;
-  const svg = svgRoot(host, W, H);
-  const labelW = 150, barX = labelW + 8, barW = W - labelW - 62;
-
-  concepts.forEach((c, i) => {
-    const y = i * rowH + 6;
-    el("text", { x: labelW, y: y + 17, "text-anchor": "end", fill: css("--text-secondary"),
-      "font-size": 12.5, "font-family": css("--font") }, svg).textContent =
-      c.concept.length > 20 ? c.concept.slice(0, 19) + "…" : c.concept;
-
-    el("rect", { x: barX, y: y + 5, width: barW, height: 15, rx: 4, fill: css("--surface-2") }, svg);
-    // One series, one colour. Length already encodes magnitude; hue must not repeat it.
-    const w = Math.max(3, c.recall * barW);
-    const p = el("path", { d: hBarPath(barX, y + 5, w, 15, 4), fill: css("--series-1") }, svg);
-    el("text", { x: barX + barW + 10, y: y + 17, fill: css("--text-primary"), "font-size": 12.5,
-      "font-weight": 600, "font-family": css("--font"), class: "num" }, svg).textContent = pct0(c.recall);
-
-    const target = el("rect", { x: barX, y: y, width: barW, height: 25, fill: "transparent" }, svg);
-    target.addEventListener("mousemove", (e) =>
-      showTip(e, c.concept, pct(c.recall) + " on exam morning", `${c.n_cards} facts`));
-    target.addEventListener("mouseleave", hideTip);
-    p.style.transition = "none";
+    // --- steam ---
+    if (!cold && level >= target) {
+      const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+      [-0.22, 0, 0.22].forEach((off, i) => {
+        const sx = cx + cupW * off;
+        const p = el("path", { d: `M${sx},${y0 - 8} q10,-14 0,-26 q-10,-14 0,-24`, fill: "none",
+          stroke: css("--crema"), "stroke-width": 2, "stroke-linecap": "round", opacity: .32 }, svg);
+        if (!still) {
+          p.style.animation = `steam 3.${i * 3}s ease-in-out ${i * 0.5}s infinite`;
+          p.style.transformOrigin = `${sx}px ${y0}px`;
+        }
+      });
+    }
   });
 }
-
-/* ------------------------------------------------------- 3. the ceiling */
-function renderCeiling(ceiling, daysToExam, target) {
-  const host = $("#ceilingChart");
-  const W = 900, H = 340;
-  const curve = ceiling.curve;
-  // Zoom the scale to the data. The whole story lives in the top of the range,
-  // and a 0-100% axis would flatten the cliff into a straight line. The axis is
-  // labelled at both ends so the zoom is visible rather than implied -- this is
-  // a line chart of a ceiling, not a bar chart, so it is not a truncation lie.
-  const lo = Math.min(...curve.map((p) => p.best_possible), target) - 0.06;
-  const floor = Math.max(0, Math.floor(lo * 20) / 20);
-  const box = { x: 48, y: 20, w: W - 66, h: H - 62, min: floor, max: 1 };
-  const svg = svgRoot(host, W, H);
-  const X = (d) => box.x + (d / daysToExam) * box.w;
-  const Y = (r) => box.y + box.h - (r - box.min) / (box.max - box.min) * box.h;
-  const ticks = [];
-  for (let t = box.min; t <= 1.0001; t += (1 - box.min) / 4) ticks.push(Math.round(t * 1000) / 1000);
-  grid(svg, box, ticks, (t) => Math.round(t * 100) + "%");
-
-  const deadline = ceiling.latest_start_day;
-
-  // Everything past the deadline is unreachable. Status colour, because it means
-  // a state (bad), not an identity.
-  if (deadline !== null && deadline < daysToExam) {
-    el("rect", { x: X(deadline), y: box.y, width: box.x + box.w - X(deadline), height: box.h,
-      fill: css("--critical"), opacity: 0.08 }, svg);
-  }
-
-  // Target line — solid hairline with a label.
-  el("line", { x1: box.x, x2: box.x + box.w, y1: Y(target), y2: Y(target),
-    stroke: css("--good"), "stroke-width": 1.5 }, svg);
-  el("text", { x: box.x + 8, y: Y(target) + 17, fill: css("--good"), "font-size": 11.5,
-    "font-weight": 600, "font-family": css("--font") }, svg)
-    .textContent = `your target · ${pct0(target)}`;
-
-  animate(el("path", { d: line(curve.map((p) => [X(p.start_day), Y(p.best_possible)])),
-    fill: "none", stroke: css("--series-1"), "stroke-width": 2.5, "stroke-linejoin": "round",
-    "stroke-linecap": "round" }, svg));
-
-  // A marker the scrubber drives.
-  const liveDot = el("circle", { r: 6, fill: css("--series-1"), stroke: css("--surface-1"),
-    "stroke-width": 2.5, opacity: 0 }, svg);
-  host.moveMarker = (day) => {
-    const p = curve.reduce((a, b) => (Math.abs(b.start_day - day) < Math.abs(a.start_day - day) ? b : a));
-    liveDot.setAttribute("cx", X(p.start_day));
-    liveDot.setAttribute("cy", Y(p.best_possible));
-    liveDot.setAttribute("opacity", 1);
-    liveDot.setAttribute("fill", p.best_possible >= target ? css("--good") : css("--critical"));
-    return p;
-  };
-
-  if (deadline !== null) {
-    el("line", { x1: X(deadline), x2: X(deadline), y1: box.y, y2: box.y + box.h,
-      stroke: css("--critical"), "stroke-width": 2 }, svg);
-    el("circle", { cx: X(deadline), cy: Y(target), r: 5, fill: css("--critical"),
-      stroke: css("--surface-1"), "stroke-width": 2 }, svg);
-    const anchor = X(deadline) > box.x + box.w * 0.62 ? "end" : "start";
-    const dx = anchor === "end" ? -12 : 12;
-    el("text", { x: X(deadline) + dx, y: box.y - 6, "text-anchor": anchor, fill: css("--critical"),
-      "font-size": 12.5, "font-weight": 650, "font-family": css("--font") }, svg)
-      .textContent = `last day to start · day ${deadline}`;
-  }
-
-  el("line", { x1: box.x, x2: box.x + box.w, y1: box.y + box.h, y2: box.y + box.h,
-    stroke: css("--border-strong"), "stroke-width": 1 }, svg);
-  for (const p of curve.filter((_, i) => i % 4 === 0)) {
-    el("text", { x: X(p.start_day), y: box.y + box.h + 20, "text-anchor": "middle",
-      fill: css("--text-muted"), "font-size": 11, "font-family": css("--font") }, svg)
-      .textContent = p.start_day === 0 ? "today" : p.start_day;
-  }
-  el("text", { x: box.x + box.w / 2, y: H - 6, "text-anchor": "middle", fill: css("--text-muted"),
-    "font-size": 11.5, "font-family": css("--font") }, svg).textContent = "the day you start studying";
-  host.dataset.axisFloor = Math.round(box.min * 100);
-
-  const cross = el("line", { y1: box.y, y2: box.y + box.h, stroke: css("--border-strong"),
-    "stroke-width": 1, opacity: 0 }, svg);
-  const hit = el("rect", { x: box.x, y: box.y, width: box.w, height: box.h, fill: "transparent" }, svg);
-  hit.addEventListener("mousemove", (e) => {
-    const r = svg.getBoundingClientRect();
-    const day = ((e.clientX - r.left) / r.width * W - box.x) / box.w * daysToExam;
-    const p = curve.reduce((a, b) => (Math.abs(b.start_day - day) < Math.abs(a.start_day - day) ? b : a));
-    cross.setAttribute("x1", X(p.start_day)); cross.setAttribute("x2", X(p.start_day));
-    cross.setAttribute("opacity", 1);
-    showTip(e, `start on day ${p.start_day}`, pct(p.best_possible) + " is the ceiling",
-      p.best_possible >= target ? "target still reachable" : "target no longer reachable at any effort");
-  });
-  hit.addEventListener("mouseleave", () => { cross.setAttribute("opacity", 0); hideTip(); });
+// keyframes for the steam, injected once so the stylesheet stays about layout
+if (!document.getElementById("cupkf")) {
+  const s = document.createElement("style"); s.id = "cupkf";
+  s.textContent = "@keyframes steam{0%{opacity:0;transform:translateY(6px) scaleY(.9)}35%{opacity:.4}100%{opacity:0;transform:translateY(-14px) scaleY(1.15)}}";
+  document.head.append(s);
 }
 
-/* --------------------------------------------------------- 4. the plan */
-function renderPlan(plan, daysToExam) {
-  const host = $("#planChart");
-  const W = 900, H = 190;
-  const box = { x: 44, y: 16, w: W - 60, h: H - 54, min: 0, max: 1 };
-  const svg = svgRoot(host, W, H);
-  const sessions = plan.sessions;
-  if (!sessions.length) { host.innerHTML = '<p class="note">No reviews needed — you are already above target.</p>'; return; }
-
-  const maxMin = Math.max(...sessions.map((s) => s.minutes));
-  const slot = box.w / Math.max(daysToExam, 1);
-  const barW = Math.max(3, Math.min(12, slot - 3));   // surface gap between adjacent bars
-
-  grid(svg, { ...box, min: 0, max: maxMin }, [0, maxMin / 2, maxMin], (t) => Math.round(t) + "m");
-
-  for (const s of sessions) {
-    const x = box.x + (s.day / daysToExam) * box.w - barW / 2;
-    const h = Math.max(2, (s.minutes / maxMin) * box.h);
-    const p = el("path", { d: barPath(x, box.y + box.h - h, barW, h, 4), fill: css("--series-1") }, svg);
-    p.addEventListener("mousemove", (e) =>
-      showTip(e, `day ${s.day}`, `${s.minutes} minutes · ${s.cards} cards`, s.concepts.slice(0, 3).join(", ")));
-    p.addEventListener("mouseleave", hideTip);
-  }
-  el("line", { x1: box.x, x2: box.x + box.w, y1: box.y + box.h, y2: box.y + box.h,
-    stroke: css("--border-strong"), "stroke-width": 1 }, svg);
-  el("line", { x1: box.x + box.w, x2: box.x + box.w, y1: box.y, y2: box.y + box.h,
-    stroke: css("--critical"), "stroke-width": 2 }, svg);
-  el("text", { x: box.x + box.w, y: box.y + box.h + 20, "text-anchor": "end", fill: css("--critical"),
-    "font-size": 11, "font-weight": 600, "font-family": css("--font") }, svg).textContent = "EXAM";
-  for (const d of [0, Math.round(daysToExam / 3), Math.round(daysToExam * 2 / 3)]) {
-    el("text", { x: box.x + (d / daysToExam) * box.w, y: box.y + box.h + 20,
-      "text-anchor": d === 0 ? "start" : "middle", fill: css("--text-muted"), "font-size": 11,
-      "font-family": css("--font") }, svg).textContent = d === 0 ? "today" : `day ${d}`;
-  }
-}
-
-/* ------------------------------------------------------------- the dashboard */
-function sparkline(points, host, colour) {
-  const W = 180, H = 34;
-  const svg = svgRoot(host, W, H);
-  const ys = points.map((p) => p.recall);
-  const lo = Math.min(...ys, 0), hi = 1;
-  const X = (i) => (i / (points.length - 1)) * W;
-  const Y = (v) => H - 3 - ((v - lo) / (hi - lo)) * (H - 6);
-  el("path", { d: line(points.map((p, i) => [X(i), Y(p.recall)])), fill: "none",
-    stroke: colour, "stroke-width": 2, "stroke-linecap": "round" }, svg);
-  el("circle", { cx: X(points.length - 1), cy: Y(ys[ys.length - 1]), r: 3, fill: colour }, svg);
-}
-
-/** Traffic light for a subject. Reserved status colours, always with a word next
-    to them -- colour alone never carries the meaning. */
-function health(recall, target) {
-  if (recall >= target) return { colour: css("--good"), word: "fine" };
-  if (recall >= target - 0.15) return { colour: css("--warning"), word: "slipping" };
-  return { colour: css("--critical"), word: "needs you" };
-}
-
-function renderDashboard(forecast, ceiling, plan, curves, days, target) {
-  const dl = ceiling.latest_start_day;
-  const weakest = forecast.per_concept[0];
-  const gone = dl === null;
-  const waitDays = gone ? 0 : dl;
-
-  $("#bigRow").innerHTML = `
-    <div class="bigcard">
-      <div class="k">If you did nothing more</div>
-      <div class="v num" id="dashHero">—</div>
-      <div class="s">is how much of your syllabus you'd still have on exam morning,
-        <strong style="color:var(--text-primary)">${days} days</strong> from today.</div>
-    </div>
-    <div class="bigcard ${gone || waitDays < days * 0.25 ? "alarm" : "fine"}">
-      <div class="k">${gone ? "Your target is gone" : "You can still wait"}</div>
-      <div class="v num">${gone ? "0" : waitDays}<span style="font-size:22px;font-weight:500;letter-spacing:0"> days</span></div>
-      <div class="s">${gone
-        ? `Even starting tonight and working every night, you'd top out at
-           ${pct(ceiling.ceiling_if_you_start_today)}.`
-        : `After day ${dl} you can no longer reach ${pct0(target)} — not with any amount of work.`}</div>
-    </div>
-    <div class="bigcard">
-      <div class="k">Weakest subject</div>
-      <div class="v" style="font-size:34px;line-height:1.15">${weakest.concept}</div>
-      <div class="s">You'd have <strong style="color:var(--text-primary)">${pct0(weakest.recall)}</strong>
-        of it left. That's where an hour is worth the most.</div>
-    </div>`;
-  countUp($("#dashHero"), forecast.overall_recall, (v) => Math.round(v * 100) + "%");
-
-  // One line: the whole syllabus, slipping.
-  const host = $("#homeChart");
-  const W = 620, H = 400, box = { x: 44, y: 16, w: W - 60, h: H - 52, min: 0, max: 1 };
-  const svg = svgRoot(host, W, H);
-  grid(svg, box, [0, 0.25, 0.5, 0.75, 1], (t) => Math.round(t * 100) + "%");
-  const X = (d) => box.x + (d / days) * box.w;
-  const Y = (r) => box.y + box.h - r * box.h;
-
-  const overall = curves.series[0].points.map((_, i) => ({
-    day: curves.series[0].points[i].day,
-    recall: curves.series.reduce((a, sr) => a + sr.points[i].recall, 0) / curves.series.length,
-  }));
-
-  el("path", { d: line(overall.map((p) => [X(p.day), Y(p.recall)])) + ` L${X(days)},${Y(0)} L${X(0)},${Y(0)} Z`,
-    fill: css("--series-1"), opacity: 0.10 }, svg);
-  animate(el("path", { d: line(overall.map((p) => [X(p.day), Y(p.recall)])), fill: "none",
-    stroke: css("--series-1"), "stroke-width": 2.5, "stroke-linecap": "round" }, svg));
-
-  if (!gone) {
-    el("line", { x1: X(dl), x2: X(dl), y1: box.y, y2: box.y + box.h, stroke: css("--warning"),
-      "stroke-width": 2, opacity: .85 }, svg);
-    el("text", { x: X(dl) - 8, y: box.y + 13, "text-anchor": "end", fill: css("--warning"),
-      "font-size": 11.5, "font-weight": 640, "font-family": css("--font") }, svg)
-      .textContent = "your cutoff";
-  }
-  el("line", { x1: X(days), x2: X(days), y1: box.y - 6, y2: box.y + box.h,
-    stroke: css("--critical"), "stroke-width": 2 }, svg);
-  el("text", { x: X(days), y: box.y - 12, "text-anchor": "end", fill: css("--critical"),
-    "font-size": 11, "font-weight": 600, "letter-spacing": ".06em", "font-family": css("--font") }, svg)
-    .textContent = "EXAM";
-  el("line", { x1: box.x, x2: box.x + box.w, y1: box.y + box.h, y2: box.y + box.h,
-    stroke: css("--border-strong"), "stroke-width": 1 }, svg);
-  for (const d of [0, Math.round(days / 3), Math.round(days * 2 / 3)]) {
-    el("text", { x: X(d), y: box.y + box.h + 20, "text-anchor": d === 0 ? "start" : "middle",
-      fill: css("--text-muted"), "font-size": 11, "font-family": css("--font") }, svg)
-      .textContent = d === 0 ? "today" : `in ${d} days`;
-  }
-
-  $("#homeLegend").innerHTML =
-    `<li><span class="swatch" style="background:${css("--series-1")}"></span>everything you know</li>` +
-    (gone ? "" : `<li><span class="swatch" style="background:${css("--warning")}"></span>your cutoff — day ${dl}</li>`) +
-    `<li><span class="swatch" style="background:${css("--critical")}"></span>exam day</li>`;
-
-  // What to do today.
-  const first = plan.sessions[0];
-  const items = [];
-  items.push(gone
-    ? ["!", "Lower your target, or accept the ceiling.",
-       `${pct0(target)} can't be reached any more. Starting tonight and going flat out gets you
-        ${pct(ceiling.ceiling_if_you_start_today)}. That's the honest number.`, true]
-    : waitDays <= 3
-    ? ["!", "Start tonight.", `Your cutoff is day ${dl}. That's basically now.`, true]
-    : ["1", `Start by day ${dl}. Not before, not after.`,
-       `Revising earlier than that mostly fades before the exam. Later and you run out of
-        nights. Put it in your calendar today so you don't have to remember.`, false]);
-  if (first) {
-    items.push(["2", `Your first session is ${first.cards} facts, about ${Math.round(first.minutes)} minutes.`,
-      `Mostly ${first.concepts.slice(0, 2).join(" and ")}. Not a whole evening — one sitting.`, false]);
-  }
-  items.push(["3", `Fix ${weakest.concept} first.`,
-    `It's your weakest at ${pct0(weakest.recall)}, so every minute there is worth more than
-     a minute anywhere else.`, false]);
-  items.push(["4", `The whole plan is ${Math.round(plan.total_minutes)} minutes.`,
-    `Spread over ${plan.sessions.length} days, that takes you from ${pct0(plan.recall_before)}
-     to ${pct0(plan.recall_after)}. That is the entire ask.`, false]);
-
-  $("#todo").innerHTML = items.map(([n, t, d, hot]) =>
-    `<div class="todo ${hot ? "hot" : ""}"><div class="badge">${n}</div>
-      <div><div class="tt">${t}</div><div class="td">${d}</div></div></div>`).join("");
-
-  // Subject cards.
-  $("#subjectCards").innerHTML = forecast.per_concept.map((c, i) => {
-    const h = health(c.recall, target);
-    return `<div class="subj"><div class="nm">${c.concept}</div>
-      <div class="pc num" style="color:${h.colour}">${pct0(c.recall)}</div>
-      <div class="st">left on exam day · ${h.word}</div>
-      <div class="spark" id="spark-${i}"></div></div>`;
-  }).join("");
-  forecast.per_concept.forEach((c, i) => {
-    const series = curves.series.find((sr) => sr.concept === c.concept);
-    if (series) sparkline(series.points, $(`#spark-${i}`), health(c.recall, target).colour);
-  });
-}
-
-/* ------------------------------------------------- the explainer curve */
-function renderExplainCurve() {
-  const host = $("#explainCurve");
+/* ============================= the scale bar ============================= */
+function renderScale(host, b, target) {
   if (!host) return;
-  const W = 520, H = 210, box = { x: 44, y: 14, w: W - 62, h: H - 52, min: 0.4, max: 1 };
-  const svg = svgRoot(host, W, H);
-  grid(svg, box, [0.4, 0.6, 0.8, 1], (t) => Math.round(t * 100) + "%");
-  const DAYS = 60;
-  const X = (d) => box.x + (d / DAYS) * box.w;
-  const Y = (r) => box.y + box.h - (r - box.min) / (box.max - box.min) * box.h;
-  const decay = (t, S) => Math.pow(1 + (Math.pow(0.9, -1 / 0.5) - 1) * t / S, -0.5);
-
-  for (const [S, colour, label] of [[4, css("--series-2"), "barely learned"],
-                                    [45, css("--series-1"), "properly stuck"]]) {
-    const pts = Array.from({ length: 60 }, (_, i) => [X(i), Y(decay(i, S))]);
-    animate(el("path", { d: line(pts), fill: "none", stroke: colour, "stroke-width": 2.5,
-      "stroke-linecap": "round" }, svg));
-    el("text", { x: X(DAYS) - 4, y: Y(decay(DAYS - 1, S)) - 9, "text-anchor": "end", fill: colour,
-      "font-size": 12, "font-weight": 620, "font-family": css("--font") }, svg).textContent = label;
-  }
-  el("line", { x1: box.x, x2: box.x + box.w, y1: box.y + box.h, y2: box.y + box.h,
-    stroke: css("--border-strong"), "stroke-width": 1 }, svg);
-  for (const d of [0, 30, 59]) {
-    el("text", { x: X(d), y: box.y + box.h + 20, "text-anchor": d === 0 ? "start" : "middle",
-      fill: css("--text-muted"), "font-size": 11, "font-family": css("--font") }, svg)
-      .textContent = d === 0 ? "today" : `${d + 1} days later`;
-  }
+  host.innerHTML = "";
+  const track = document.createElement("div"); track.className = "track";
+  const bandEl = document.createElement("div"); bandEl.className = "band";
+  bandEl.style.left = (b.lo * 100) + "%";
+  bandEl.style.width = Math.max(1.5, (b.hi - b.lo) * 100) + "%";
+  const tgt = document.createElement("div"); tgt.className = "tgt";
+  tgt.style.left = (target * 100) + "%";
+  tgt.title = `your target · ${pct0(target)}`;
+  track.append(bandEl, tgt);
+  const ticks = document.createElement("div"); ticks.className = "ticks";
+  ticks.innerHTML = `<span>nothing</span><span>half of it</span><span>all of it</span>`;
+  host.append(track, ticks);
 }
 
-/* -------------------------------------------------- 5. the two-exam frontier */
+/* ============================= 1. decay curves ============================= */
+/** Zoomed axis floor for the decay chart, in one place so the caption that
+    describes the zoom cannot drift away from the chart that applies it. */
+function decayFloor(series) {
+  const lowest = Math.min(...series.flatMap((s) => s.points.map((p) => p.recall)));
+  return Math.max(0, Math.floor((lowest - 0.08) * 10) / 10);
+}
+
+function renderDecay(series, days, weakest) {
+  const host = $("#decayChart");
+  const shown = () => series.filter((s) => !state.isolate || s.concept === state.isolate);
+
+  chart(host, (svg, W, H) => {
+    // Zoom the scale to the data: on a 0-100% axis eight subjects collapse into
+    // one grey band in the top third. Both ends are labelled so the zoom is
+    // visible rather than implied.
+    const floor = decayFloor(series);
+    const box = { x: 40, y: 14, w: W - 56, h: H - 40, min: floor, max: 1 };
+    if (box.w < 60 || box.h < 60) return;
+    host.dataset.axisFloor = Math.round(floor * 100);
+    grid(svg, box, [floor, (floor + 1) / 2, 1], (t) => Math.round(t * 100) + "%");
+    const X = (d) => box.x + (d / days) * box.w;
+    const Y = (r) => box.y + box.h - (r - box.min) / (box.max - box.min) * box.h;
+
+    el("line", { x1: X(days), x2: X(days), y1: box.y - 4, y2: box.y + box.h, stroke: css("--critical"), "stroke-width": 2 }, svg);
+    text(svg, X(days), box.y - 8, "EXAM", { anchor: "end", fill: css("--critical"), size: 10, weight: 700, attrs: { "letter-spacing": ".08em" } });
+
+    const list = shown();
+    const ordered = [...list].sort((a, b) => (a.concept === weakest ? 1 : b.concept === weakest ? -1 : 0));
+    for (const s of ordered) {
+      const isWeak = s.concept === weakest || state.isolate === s.concept;
+      animate(el("path", { d: line(s.points.map((p) => [X(p.day), Y(p.recall)])), fill: "none",
+        stroke: isWeak ? css("--series-1") : css("--context"),
+        "stroke-width": isWeak ? 2.5 : 1.5, "stroke-linecap": "round", opacity: isWeak ? 1 : .7 }, svg));
+    }
+    const weak = list.find((s) => s.concept === (state.isolate || weakest));
+    if (weak) {
+      const last = weak.points[weak.points.length - 1];
+      el("circle", { cx: X(last.day), cy: Y(last.recall), r: 4.5, fill: css("--series-1"),
+        stroke: css("--surface-1"), "stroke-width": 2 }, svg);
+      text(svg, X(last.day) - 10, Y(last.recall) - 10, scaleWord(band(last.recall, days).mid) + " left",
+        { anchor: "end", fill: css("--series-1"), size: 12, weight: 620 });
+    }
+    axis(svg, box);
+    for (const d of [0, Math.round(days / 2), days])
+      text(svg, X(d), box.y + box.h + 18, d === 0 ? "today" : `day ${d}`, { anchor: d === 0 ? "start" : d === days ? "end" : "middle" });
+
+    // crosshair: the reader aims at a day, never at a 2px line
+    const cross = el("line", { y1: box.y, y2: box.y + box.h, stroke: css("--border-strong"), "stroke-width": 1, opacity: 0 }, svg);
+    const dot = el("circle", { r: 4, fill: css("--series-1"), stroke: css("--surface-1"), "stroke-width": 2, opacity: 0 }, svg);
+    const hit = el("rect", { x: box.x, y: box.y, width: box.w, height: box.h, fill: "transparent" }, svg);
+    const read = (e) => {
+      const r = svg.getBoundingClientRect();
+      const day = Math.max(0, Math.min(days, ((e.clientX - r.left) - box.x) / box.w * days));
+      cross.setAttribute("x1", X(day)); cross.setAttribute("x2", X(day)); cross.setAttribute("opacity", 1);
+      const rows = list.map((s) => {
+        const p = s.points.reduce((a, b) => (Math.abs(b.day - day) < Math.abs(a.day - day) ? b : a));
+        return { c: s.concept, r: p.recall };
+      }).sort((a, b) => a.r - b.r);
+      const avg = rows.reduce((a, b) => a + b.r, 0) / rows.length;
+      dot.setAttribute("cx", X(day)); dot.setAttribute("cy", Y(avg)); dot.setAttribute("opacity", 1);
+      const bb = band(avg, days);
+      showTip(e, `day ${Math.round(day)}`, state.exact ? pct(avg) : `${pct0(bb.lo)}–${pct0(bb.hi)} overall`,
+        rows.slice(0, 4).map((r) => ({ label: r.c, value: state.exact ? pct(r.r) : pct0(band(r.r, days).mid),
+          colour: r.c === weakest ? css("--series-1") : css("--context") })));
+      $("#decayRead").innerHTML =
+        `<span>day <span class="rv num">${Math.round(day)}</span></span>` +
+        `<span>overall <span class="rv num">${state.exact ? pct(avg) : pct0(bb.mid)}</span></span>` +
+        `<span>weakest then · <span class="rv">${rows[0].c}</span></span>`;
+    };
+    hit.addEventListener("pointermove", read);
+    hit.addEventListener("pointerdown", read);
+    hit.addEventListener("pointerleave", () => {
+      cross.setAttribute("opacity", 0); dot.setAttribute("opacity", 0); hideTip();
+      $("#decayRead").innerHTML = `<span>hover the chart to read off any day between now and the exam</span>`;
+    });
+  });
+
+  // legend doubles as the filter
+  const leg = $("#decayLegend");
+  leg.innerHTML = "";
+  for (const s of series) {
+    const li = document.createElement("li");
+    li.className = "pick" + (state.isolate && state.isolate !== s.concept ? " off" : "");
+    const sw = document.createElement("span"); sw.className = "swatch";
+    sw.style.background = s.concept === weakest ? css("--series-1") : css("--context");
+    const nm = document.createElement("span"); nm.textContent = s.concept;
+    li.append(sw, nm);
+    li.addEventListener("click", () => {
+      state.isolate = state.isolate === s.concept ? null : s.concept;
+      renderDecay(series, days, weakest); repaint($("#decayChart"));
+    });
+    leg.append(li);
+  }
+  $("#decayRead").innerHTML = `<span>hover the chart to read off any day between now and the exam</span>`;
+}
+
+/* ========================== 2. subjects, as ranges ========================== */
+function renderConcepts(concepts, days, target) {
+  chart($("#conceptChart"), (svg, W, H) => {
+    const rows = concepts.length;
+    const rowH = Math.max(26, Math.min(46, (H - 24) / rows));
+    const labelW = Math.min(150, W * 0.36), barX = labelW + 10, barW = W - labelW - 78;
+    if (barW < 40) return;
+    concepts.forEach((c, i) => {
+      const y = 10 + i * rowH, mid = y + rowH / 2;
+      const b = band(c.recall, days);
+      const name = c.concept.length > 22 ? c.concept.slice(0, 21) + "…" : c.concept;
+      text(svg, labelW, mid + 4, name, { anchor: "end", fill: css("--text-secondary"), size: 12.5 });
+      el("rect", { x: barX, y: mid - 7, width: barW, height: 14, rx: 5, fill: "rgba(255,235,212,.06)" }, svg);
+      // the bar IS the range: left edge = low end, right edge = high end
+      const x1 = barX + b.lo * barW, x2 = barX + b.hi * barW;
+      el("path", { d: hBarPath(barX, mid - 7, Math.max(3, x1 - barX), 14, 5), fill: css("--series-1"), opacity: .45 }, svg);
+      el("rect", { x: x1, y: mid - 7, width: Math.max(2, x2 - x1), height: 14, fill: css("--series-1") }, svg);
+      // target tick
+      el("line", { x1: barX + target * barW, x2: barX + target * barW, y1: mid - 11, y2: mid + 11,
+        stroke: css("--crema"), "stroke-width": 1.5, opacity: .8 }, svg);
+      text(svg, barX + barW + 8, mid + 4,
+        state.exact ? pct(c.recall) : `${pct0(b.lo)}–${pct0(b.hi)}`,
+        { fill: css("--text-primary"), size: 12, weight: 600 });
+
+      const hitTarget = el("rect", { x: 0, y, width: W, height: rowH, fill: "transparent" }, svg);
+      hitTarget.addEventListener("pointermove", (e) => showTip(e, c.concept,
+        state.exact ? pct(c.recall) + " on exam morning" : `${pct0(b.lo)}–${pct0(b.hi)} on exam morning`,
+        [{ label: "facts", value: String(c.n_cards) },
+         { label: "raw model output", value: pct(c.recall) },
+         { label: "vs your target", value: b.mid >= target ? "clears it" : `${Math.round((target - b.mid) * 100)} pts short` }]));
+      hitTarget.addEventListener("pointerleave", hideTip);
+    });
+  });
+}
+
+/* ============================== 3. the ceiling ============================== */
+function renderCeiling(ceiling, days, target) {
+  const host = $("#ceilingChart");
+  const curve = ceiling.curve;
+  chart(host, (svg, W, H) => {
+    const floor = ceilingFloor(ceiling, target);
+    const box = { x: 44, y: 18, w: W - 60, h: H - 46, min: floor, max: 1 };
+    if (box.w < 60 || box.h < 60) return;
+    const X = (d) => box.x + (d / days) * box.w;
+    const Y = (r) => box.y + box.h - (r - box.min) / (box.max - box.min) * box.h;
+    const ticks = [];
+    for (let t = box.min; t <= 1.0001; t += (1 - box.min) / 3) ticks.push(Math.round(t * 1000) / 1000);
+    grid(svg, box, ticks, (t) => Math.round(t * 100) + "%");
+    host.dataset.axisFloor = Math.round(box.min * 100);
+
+    const dl = ceiling.latest_start_day;
+    if (dl !== null && dl < days)
+      el("rect", { x: X(dl), y: box.y, width: box.x + box.w - X(dl), height: box.h, fill: css("--critical"), opacity: .09 }, svg);
+
+    el("line", { x1: box.x, x2: box.x + box.w, y1: Y(target), y2: Y(target), stroke: css("--good"), "stroke-width": 1.5 }, svg);
+    text(svg, box.x + 8, Y(target) + 15, `your target · ${pct0(target)}`, { fill: css("--good"), size: 11, weight: 600 });
+
+    animate(el("path", { d: line(curve.map((p) => [X(p.start_day), Y(p.best_possible)])), fill: "none",
+      stroke: css("--series-1"), "stroke-width": 2.5, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg));
+
+    if (dl !== null) {
+      el("line", { x1: X(dl), x2: X(dl), y1: box.y, y2: box.y + box.h, stroke: css("--critical"), "stroke-width": 2 }, svg);
+      const anchor = X(dl) > box.x + box.w * 0.6 ? "end" : "start";
+      text(svg, X(dl) + (anchor === "end" ? -10 : 10), box.y - 4, `last day to start · day ${dl}`,
+        { anchor, fill: css("--critical"), size: 12, weight: 650 });
+    }
+    axis(svg, box);
+    for (const d of [0, Math.round(days / 3), Math.round(days * 2 / 3), days - 1])
+      text(svg, X(d), box.y + box.h + 17, d === 0 ? "today" : "day " + d, { anchor: d === 0 ? "start" : "middle" });
+
+    // a marker you can drag straight on the chart, wired to the slider both ways
+    const liveDot = el("circle", { r: 7, fill: css("--series-1"), stroke: css("--surface-1"), "stroke-width": 2.5, opacity: 0 }, svg);
+    const liveLine = el("line", { y1: box.y, y2: box.y + box.h, stroke: css("--border-strong"), "stroke-width": 1, opacity: 0 }, svg);
+    host.moveMarker = (day) => {
+      const p = curve.reduce((a, b) => (Math.abs(b.start_day - day) < Math.abs(a.start_day - day) ? b : a));
+      liveDot.setAttribute("cx", X(p.start_day)); liveDot.setAttribute("cy", Y(p.best_possible));
+      liveDot.setAttribute("opacity", 1);
+      liveDot.setAttribute("fill", p.best_possible >= target ? css("--good") : css("--critical"));
+      liveLine.setAttribute("x1", X(p.start_day)); liveLine.setAttribute("x2", X(p.start_day));
+      liveLine.setAttribute("opacity", 1);
+      return p;
+    };
+    const hit = el("rect", { x: box.x, y: box.y, width: box.w, height: box.h, fill: "transparent", cursor: "ew-resize" }, svg);
+    const toDay = (e) => {
+      const r = svg.getBoundingClientRect();
+      return Math.max(0, Math.min(days - 1, Math.round(((e.clientX - r.left) - box.x) / box.w * days)));
+    };
+    const drag = (e) => {
+      const d = toDay(e);
+      const slider = $("#startday");
+      slider.value = String(d);
+      slider.dispatchEvent(new Event("input"));
+      const p = host.moveMarker(d);
+      showTip(e, `start on day ${p.start_day}`,
+        state.exact ? pct(p.best_possible) + " ceiling" : `tops out ${pct0(band(p.best_possible, days).lo)}–${pct0(band(p.best_possible, days).hi)}`,
+        [{ label: p.best_possible >= target ? "target still reachable" : "target gone at any effort", value: "" }]);
+    };
+    hit.addEventListener("pointermove", (e) => { if (e.buttons) drag(e); else {
+      const p = host.moveMarker(toDay(e));
+      showTip(e, `start on day ${p.start_day}`,
+        state.exact ? pct(p.best_possible) : `${pct0(band(p.best_possible, days).lo)}–${pct0(band(p.best_possible, days).hi)}`,
+        [{ label: p.best_possible >= target ? "still reachable" : "no longer reachable", value: "" }]);
+    } });
+    hit.addEventListener("pointerdown", (e) => { hit.setPointerCapture(e.pointerId); drag(e); });
+    hit.addEventListener("pointerleave", hideTip);
+    if (host._lastDay != null) host.moveMarker(host._lastDay);
+    if (host._afterPaint) host._afterPaint();
+  });
+}
+/** The zoomed axis floor. Computed in one place so the caption cannot drift
+    away from the chart it describes. */
+function ceilingFloor(ceiling, target) {
+  const lo = Math.min(...ceiling.curve.map((p) => p.best_possible), target) - 0.06;
+  return Math.max(0, Math.floor(lo * 20) / 20);
+}
+
+/* =============================== 4. the plan =============================== */
+function renderPlan(plan, days) {
+  chart($("#planChart"), (svg, W, H) => {
+    const sessions = plan.sessions;
+    const box = { x: 40, y: 14, w: W - 54, h: H - 40 };
+    if (!sessions.length || box.w < 60) { text(svg, 10, 24, "No reviews needed — you are already above target.", { fill: css("--text-secondary"), size: 13 }); return; }
+    const maxMin = Math.max(...sessions.map((s) => s.minutes));
+    grid(svg, { ...box, min: 0, max: maxMin }, [0, maxMin / 2, maxMin], (t) => Math.round(t) + "m");
+    // Every session lands in a narrow window near the exam. That emptiness is
+    // the finding, so label it rather than zooming it away.
+    const firstDay = Math.min(...sessions.map((s) => s.day)), lastDay = Math.max(...sessions.map((s) => s.day));
+    const wx = box.x + (firstDay / days) * box.w, wr = box.x + (lastDay / days) * box.w;
+    el("rect", { x: wx - 6, y: box.y, width: wr - wx + 12, height: box.h, fill: css("--series-1"), opacity: .07, rx: 6 }, svg);
+    text(svg, Math.max(box.x + 4, wx - 12), box.y + 14,
+      `all ${sessions.length} evenings sit here — day ${firstDay} to ${lastDay}`,
+      { anchor: wx - 12 > box.x + 140 ? "end" : "start", fill: css("--text-secondary"), size: 11.5, weight: 600 });
+    const slot = box.w / Math.max(days, 1);
+    const barW = Math.max(5, Math.min(14, slot - 3));
+    for (const s of sessions) {
+      const x = box.x + (s.day / days) * box.w - barW / 2;
+      const h = Math.max(2, (s.minutes / maxMin) * box.h);
+      const p = el("path", { d: barPath(x, box.y + box.h - h, barW, h, 4), fill: css("--series-1") }, svg);
+      const hit = el("rect", { x: x - 4, y: box.y, width: barW + 8, height: box.h, fill: "transparent" }, svg);
+      hit.addEventListener("pointermove", (e) => {
+        p.setAttribute("fill", css("--crema"));
+        showTip(e, `day ${s.day}`, `${Math.round(s.minutes)} min · ${s.cards} facts`,
+          s.concepts.slice(0, 3).map((c) => ({ label: c, value: "" })));
+      });
+      hit.addEventListener("pointerleave", () => { p.setAttribute("fill", css("--series-1")); hideTip(); });
+    }
+    axis(svg, box);
+    el("line", { x1: box.x + box.w, x2: box.x + box.w, y1: box.y, y2: box.y + box.h, stroke: css("--critical"), "stroke-width": 2 }, svg);
+    text(svg, box.x + box.w, box.y + box.h + 17, "EXAM", { anchor: "end", fill: css("--critical"), size: 10, weight: 700 });
+    for (const d of [0, Math.round(days / 3), Math.round(days * 2 / 3)])
+      text(svg, box.x + (d / days) * box.w, box.y + box.h + 17, d === 0 ? "today" : "day " + d, { anchor: d === 0 ? "start" : "middle" });
+  });
+
+  // where the effort lands: evenings that touch each subject
+  const counts = {};
+  for (const s of plan.sessions) for (const c of s.concepts) counts[c] = (counts[c] || 0) + 1;
+  const rows = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  chart($("#planMixChart"), (svg, W, H) => {
+    if (!rows.length) return;
+    const rowH = Math.max(18, Math.min(30, (H - 10) / rows.length));
+    const labelW = Math.min(140, W * 0.42), barX = labelW + 8, barW = W - labelW - 44;
+    const max = Math.max(...rows.map((r) => r[1]));
+    rows.forEach(([name, n], i) => {
+      const mid = 8 + i * rowH + rowH / 2;
+      text(svg, labelW, mid + 4, name.length > 20 ? name.slice(0, 19) + "…" : name, { anchor: "end", fill: css("--text-secondary"), size: 12 });
+      el("path", { d: hBarPath(barX, mid - 5, Math.max(3, (n / max) * barW), 10, 4), fill: css("--series-1"), opacity: .9 }, svg);
+      text(svg, barX + (n / max) * barW + 8, mid + 4, String(n), { fill: css("--text-primary"), size: 11.5, weight: 600 });
+    });
+  });
+}
+
+/* ============================ 5. the frontier ============================ */
 function renderFrontier(data) {
   const host = $("#frontierChart");
   const pts = data.points;
-  const W = 460, H = 380;
-  const xs = pts.map((p) => p.recall_second), ys = pts.map((p) => p.recall_first);
-  const pad = 0.03;
-  const xmin = Math.min(...xs) - pad, xmax = Math.max(...xs) + pad;
-  const ymin = Math.min(...ys) - pad, ymax = Math.max(...ys) + pad;
-  const box = { x: 56, y: 20, w: W - 76, h: H - 76 };
-  const svg = svgRoot(host, W, H);
-  const X = (v) => box.x + (v - xmin) / (xmax - xmin) * box.w;
-  const Y = (v) => box.y + box.h - (v - ymin) / (ymax - ymin) * box.h;
+  chart(host, (svg, W, H) => {
+    const xs = pts.map((p) => p.recall_second), ys = pts.map((p) => p.recall_first);
+    const pad = 0.03;
+    const xmin = Math.min(...xs) - pad, xmax = Math.max(...xs) + pad;
+    const ymin = Math.min(...ys) - pad, ymax = Math.max(...ys) + pad;
+    const box = { x: 52, y: 16, w: W - 68, h: H - 62 };
+    if (box.w < 60 || box.h < 60) return;
+    const X = (v) => box.x + (v - xmin) / (xmax - xmin) * box.w;
+    const Y = (v) => box.y + box.h - (v - ymin) / (ymax - ymin) * box.h;
+    for (let i = 0; i <= 3; i++) {
+      const v = ymin + (ymax - ymin) * i / 3;
+      el("line", { x1: box.x, x2: box.x + box.w, y1: Y(v), y2: Y(v), stroke: css("--border"), "stroke-width": 1 }, svg);
+      text(svg, box.x - 8, Y(v) + 4, Math.round(v * 100) + "%", { anchor: "end" });
+      const h = xmin + (xmax - xmin) * i / 3;
+      text(svg, X(h), box.y + box.h + 17, Math.round(h * 100) + "%", { anchor: "middle" });
+    }
+    text(svg, box.x + box.w / 2, H - 6, "what you hold at END-SEMS →", { anchor: "middle", fill: css("--text-secondary"), size: 11.5 });
+    text(svg, -(box.y + box.h / 2), 13, "what you hold at MID-SEMS →",
+      { anchor: "middle", fill: css("--text-secondary"), size: 11.5, attrs: { transform: "rotate(-90)" } });
 
-  for (let i = 0; i <= 3; i++) {
-    const v = ymin + (ymax - ymin) * i / 3;
-    el("line", { x1: box.x, x2: box.x + box.w, y1: Y(v), y2: Y(v), stroke: css("--border"),
-      "stroke-width": 1 }, svg);
-    el("text", { x: box.x - 9, y: Y(v) + 4, "text-anchor": "end", fill: css("--text-muted"),
-      "font-size": 11, "font-family": css("--font") }, svg).textContent = Math.round(v * 100) + "%";
-    const h = xmin + (xmax - xmin) * i / 3;
-    el("text", { x: X(h), y: box.y + box.h + 20, "text-anchor": "middle", fill: css("--text-muted"),
-      "font-size": 11, "font-family": css("--font") }, svg).textContent = Math.round(h * 100) + "%";
-  }
-  el("text", { x: box.x + box.w / 2, y: H - 22, "text-anchor": "middle", fill: css("--text-secondary"),
-    "font-size": 12, "font-family": css("--font") }, svg).textContent = "what you hold at END-SEMS →";
-  el("text", { x: -(box.y + box.h / 2), y: 15, transform: "rotate(-90)", "text-anchor": "middle",
-    fill: css("--text-secondary"), "font-size": 12, "font-family": css("--font") }, svg)
-    .textContent = "what you hold at MID-SEMS →";
-
-  const live = pts.filter((p) => !p.dominated).sort((a, b) => a.recall_second - b.recall_second);
-  animate(el("path", { d: line(live.map((p) => [X(p.recall_second), Y(p.recall_first)])),
-    fill: "none", stroke: css("--series-1"), "stroke-width": 2, "stroke-linejoin": "round" }, svg));
-
-  for (const p of pts) {
-    const dot = el("circle", { cx: X(p.recall_second), cy: Y(p.recall_first), r: p.dominated ? 4 : 5.5,
-      fill: p.dominated ? css("--context") : css("--series-1"),
-      stroke: css("--surface-1"), "stroke-width": 2 }, svg);
-    dot.addEventListener("mousemove", (e) => showTip(e,
-      `${Math.round(p.weight * 100)}% of your effort on mid-sems`,
-      `${pct(p.recall_first)} / ${pct(p.recall_second)}`,
-      p.dominated ? "dominated — never pick this" : `${p.reviews_before_first} reviews before, ${p.reviews_after_first} after`));
-    dot.addEventListener("mouseleave", hideTip);
-  }
-
-  const liveDot = el("circle", { r: 8, fill: "none", stroke: css("--series-2"),
-    "stroke-width": 2.5, opacity: 0 }, svg);
-  host.moveMarker = (weight) => {
-    const p = pts.reduce((a, b) => (Math.abs(b.weight - weight) < Math.abs(a.weight - weight) ? b : a));
-    liveDot.setAttribute("cx", X(p.recall_second));
-    liveDot.setAttribute("cy", Y(p.recall_first));
-    liveDot.setAttribute("opacity", 1);
-    return p;
-  };
+    const live = pts.filter((p) => !p.dominated).sort((a, b) => a.recall_second - b.recall_second);
+    animate(el("path", { d: line(live.map((p) => [X(p.recall_second), Y(p.recall_first)])), fill: "none",
+      stroke: css("--series-1"), "stroke-width": 2, "stroke-linejoin": "round" }, svg));
+    for (const p of pts) {
+      el("circle", { cx: X(p.recall_second), cy: Y(p.recall_first), r: p.dominated ? 4 : 6,
+        fill: p.dominated ? css("--context") : css("--series-1"), stroke: css("--surface-1"), "stroke-width": 2 }, svg);
+      const hit = el("circle", { cx: X(p.recall_second), cy: Y(p.recall_first), r: 14, fill: "transparent" }, svg);
+      hit.addEventListener("pointermove", (e) => showTip(e,
+        `${Math.round(p.weight * 100)}% of your effort on mid-sems`,
+        `${pct0(p.recall_first)} then ${pct0(p.recall_second)}`,
+        [{ label: "reviews before mid-sems", value: String(p.reviews_before_first) },
+         { label: "after", value: String(p.reviews_after_first) },
+         ...(p.dominated ? [{ label: "dominated — never pick this", value: "" }] : [])]));
+      hit.addEventListener("pointerleave", hideTip);
+      hit.addEventListener("pointerdown", () => {
+        const s = $("#tradeoff"); s.value = String(Math.round(p.weight * 100)); s.dispatchEvent(new Event("input"));
+      });
+    }
+    const liveDot = el("circle", { r: 10, fill: "none", stroke: css("--crema"), "stroke-width": 2.5, opacity: 0 }, svg);
+    host.moveMarker = (weight) => {
+      const p = pts.reduce((a, b) => (Math.abs(b.weight - weight) < Math.abs(a.weight - weight) ? b : a));
+      liveDot.setAttribute("cx", X(p.recall_second)); liveDot.setAttribute("cy", Y(p.recall_first));
+      liveDot.setAttribute("opacity", 1);
+      return p;
+    };
+    if (host._lastWeight != null) host.moveMarker(host._lastWeight);
+  });
   return pts;
 }
 
-/* ------------------------------------------------- 6. the reliability curve */
+/* ========================== 6. the reliability curve ========================== */
 function renderCalibration(data) {
-  const host = $("#calChart");
-  const W = 400, H = 380, box = { x: 50, y: 18, w: W - 70, h: H - 66 };
-  const svg = svgRoot(host, W, H);
-  const lo = 0.25;
-  const X = (v) => box.x + (v - lo) / (1 - lo) * box.w;
-  const Y = (v) => box.y + box.h - (v - lo) / (1 - lo) * box.h;
+  CAL.ece = data.ece; CAL.byHorizon = data.by_horizon; CAL.loaded = true;
+  chart($("#calChart"), (svg, W, H) => {
+    const box = { x: 46, y: 16, w: W - 62, h: H - 54 };
+    if (box.w < 60 || box.h < 60) return;
+    const lo = 0.25;
+    const X = (v) => box.x + (v - lo) / (1 - lo) * box.w;
+    const Y = (v) => box.y + box.h - (v - lo) / (1 - lo) * box.h;
+    for (let v = 0.25; v <= 1.001; v += 0.25) {
+      el("line", { x1: box.x, x2: box.x + box.w, y1: Y(v), y2: Y(v), stroke: css("--border"), "stroke-width": 1 }, svg);
+      text(svg, box.x - 8, Y(v) + 4, Math.round(v * 100) + "%", { anchor: "end" });
+      text(svg, X(v), box.y + box.h + 17, Math.round(v * 100) + "%", { anchor: "middle" });
+    }
+    el("line", { x1: X(lo), y1: Y(lo), x2: X(1), y2: Y(1), stroke: css("--good"), "stroke-width": 1.5 }, svg);
+    text(svg, X(0.94), Y(0.99), "perfectly honest", { anchor: "end", fill: css("--good"), size: 11, weight: 600 });
+    animate(el("path", { d: line(data.curve.map((b) => [X(b.predicted), Y(b.actual)])), fill: "none",
+      stroke: css("--series-1"), "stroke-width": 2.5, "stroke-linejoin": "round" }, svg));
+    for (const b of data.curve) {
+      const r = Math.min(3 + Math.sqrt(b.n) / 90, 9);
+      el("circle", { cx: X(b.predicted), cy: Y(b.actual), r, fill: css("--series-1"), stroke: css("--surface-1"), "stroke-width": 2 }, svg);
+      const hit = el("circle", { cx: X(b.predicted), cy: Y(b.actual), r: 14, fill: "transparent" }, svg);
+      hit.addEventListener("pointermove", (e) => showTip(e, `Cutoff said ${pct(b.predicted)}`,
+        `${pct(b.actual)} actually recalled`, [{ label: "reviews in this bin", value: b.n.toLocaleString() }]));
+      hit.addEventListener("pointerleave", hideTip);
+    }
+    text(svg, box.x + box.w / 2, H - 4, "what Cutoff predicted", { anchor: "middle", fill: css("--text-secondary"), size: 11.5 });
+    text(svg, -(box.y + box.h / 2), 12, "what actually happened",
+      { anchor: "middle", fill: css("--text-secondary"), size: 11.5, attrs: { transform: "rotate(-90)" } });
+  });
 
-  for (let v = 0.25; v <= 1.001; v += 0.25) {
-    el("line", { x1: box.x, x2: box.x + box.w, y1: Y(v), y2: Y(v), stroke: css("--border"), "stroke-width": 1 }, svg);
-    el("text", { x: box.x - 9, y: Y(v) + 4, "text-anchor": "end", fill: css("--text-muted"),
-      "font-size": 11, "font-family": css("--font") }, svg).textContent = Math.round(v * 100) + "%";
-    el("text", { x: X(v), y: box.y + box.h + 20, "text-anchor": "middle", fill: css("--text-muted"),
-      "font-size": 11, "font-family": css("--font") }, svg).textContent = Math.round(v * 100) + "%";
-  }
-  // Perfect calibration.
-  el("line", { x1: X(lo), y1: Y(lo), x2: X(1), y2: Y(1), stroke: css("--good"), "stroke-width": 1.5 }, svg);
-  el("text", { x: X(0.93), y: Y(0.99), "text-anchor": "end", fill: css("--good"), "font-size": 11,
-    "font-weight": 600, "font-family": css("--font") }, svg).textContent = "perfectly honest";
-
-  animate(el("path", { d: line(data.curve.map((b) => [X(b.predicted), Y(b.actual)])), fill: "none",
-    stroke: css("--series-1"), "stroke-width": 2.5, "stroke-linejoin": "round" }, svg));
-  for (const b of data.curve) {
-    const r = 3 + Math.sqrt(b.n) / 90;
-    const dot = el("circle", { cx: X(b.predicted), cy: Y(b.actual), r: Math.min(r, 9),
-      fill: css("--series-1"), stroke: css("--surface-1"), "stroke-width": 2 }, svg);
-    dot.addEventListener("mousemove", (e) => showTip(e, `Cutoff said ${pct(b.predicted)}`,
-      `${pct(b.actual)} actually recalled`, `${b.n.toLocaleString()} reviews`));
-    dot.addEventListener("mouseleave", hideTip);
-  }
-  el("text", { x: box.x + box.w / 2, y: H - 6, "text-anchor": "middle", fill: css("--text-secondary"),
-    "font-size": 12, "font-family": css("--font") }, svg).textContent = "what Cutoff predicted";
-  el("text", { x: -(box.y + box.h / 2), y: 14, transform: "rotate(-90)", "text-anchor": "middle",
-    fill: css("--text-secondary"), "font-size": 12, "font-family": css("--font") }, svg)
-    .textContent = "what actually happened";
-
-  $("#calCaption").textContent =
-    `${data.reviews.toLocaleString()} held-out reviews. Dot size is how many reviews fall in that bin.`;
-  $("#horizonTable").innerHTML = `<table><thead><tr><th>how far ahead</th><th>predicted</th>
-      <th>actual</th><th>gap</th></tr></thead><tbody>
-      ${data.by_horizon.map((h) => `<tr><td>${h.label}</td><td class="num">${pct(h.predicted)}</td>
+  $("#calCaption").textContent = `${data.reviews.toLocaleString()} held-out reviews. Dot size is how many fall in that bin.`;
+  const last = data.by_horizon[data.by_horizon.length - 1];
+  $("#horizonTable").innerHTML = `<table><thead><tr><th>how far ahead</th><th>predicted</th><th>actual</th><th>gap</th></tr></thead><tbody>
+    ${data.by_horizon.map((h) => `<tr><td>${h.label}</td><td class="num">${pct(h.predicted)}</td>
       <td class="num">${pct(h.actual)}</td><td class="num" style="color:var(--warning)">+${((h.predicted - h.actual) * 100).toFixed(1)}</td></tr>`).join("")}
     </tbody></table>`;
   $("#calNote").innerHTML = `Expected calibration error <strong style="color:var(--text-primary)">${data.ece.toFixed(4)}</strong>.
-    Every gap is positive, so Cutoff is consistently a little <em>over</em>confident — worst at the extremes,
-    where it says 45% and 30% recall. Its long-range accuracy is the point: three months out it is off by
-    ${(data.by_horizon.length ? (data.by_horizon[data.by_horizon.length - 1].predicted - data.by_horizon[data.by_horizon.length - 1].actual) * 100 : 0).toFixed(1)} points, and forecasting months ahead is the entire premise.`;
+    Every gap is positive, so Cutoff is consistently a little <em>over</em>confident. Three months out it is off by
+    ${((last.predicted - last.actual) * 100).toFixed(1)} points — and forecasting months ahead is the entire premise, which is why
+    every figure in this app is shown as a range that wide, shifted down by the bias measured here.`;
+  if (state.forecast) renderAll();     // bands were provisional until this landed
 }
 
-/* ------------------------------------------------------ 7. the proof table */
+/* ============================ 7. the proof table ============================ */
 function renderProof(data) {
   const host = $("#proofTable");
-  const ours = data.ours, published = data.published;
-  const rows = [];
-  // Matched on shape, not on an exact string: the artifact is regenerated by
-  // scripts/benchmark.py, and a table that dies when a label is edited is a
-  // table that dies on stage.
   const PLAIN = [
     [/unfitted/i, "Cutoff, before it learned anything", "baseline"],
     [/DSR|fitted/i, "Cutoff, after learning from real data", "fitted"],
@@ -686,81 +722,79 @@ function renderProof(data) {
     [/AVG|mean/i, "Just guessing the average every time", "avg"],
   ];
   const label = (name) => PLAIN.find(([re]) => re.test(name)) || [null, name, "other"];
-  for (const [name, s] of Object.entries(ours)) {
+  const rows = Object.entries(data.ours).map(([name, s]) => {
     const [, plain, kind] = label(name);
-    rows.push({ name: plain, key: name, kind, ...s, mine: true });
-  }
-
+    return { name: plain, kind, ...s };
+  });
   const fmt = (v, d = 4) => (v === null || v === undefined || Number.isNaN(v) ? "—" : v.toFixed(d));
-  const best = { log_loss: Math.min(...rows.map((r) => r.log_loss)),
-                 rmse_bins: Math.min(...rows.map((r) => r.rmse_bins)),
-                 auc: Math.max(...rows.map((r) => r.auc)) };
-
-  const cell = (r, k) => {
-    const isBest = Math.abs(r[k] - best[k]) < 1e-9;
-    return `<td class="num"${isBest ? ' style="color:var(--good);font-weight:650"' : ""}>${fmt(r[k], k === "rmse_bins" ? 4 : 4)}</td>`;
-  };
+  const best = { log_loss: Math.min(...rows.map((r) => r.log_loss)), rmse_bins: Math.min(...rows.map((r) => r.rmse_bins)), auc: Math.max(...rows.map((r) => r.auc)) };
+  const cell = (r, k) => `<td class="num"${Math.abs(r[k] - best[k]) < 1e-9 ? ' style="color:var(--good);font-weight:650"' : ""}>${fmt(r[k])}</td>`;
 
   host.classList.remove("loading");
-  host.innerHTML = `
-    <table>
-      <thead><tr><th>what we tested</th>
-        <th>how wrong it is<br><span class="tech">log loss · lower is better</span></th>
-        <th>how honest it is<br><span class="tech">calibration · lower is better</span></th>
-        <th>can it tell them apart?<br><span class="tech">AUC · 0.50 is a coin flip</span></th></tr></thead>
-      <tbody>
-        ${rows.map((r) => `<tr class="${r.kind === "fitted" ? "ours" : ""}">
-          <td>${r.name}</td>${cell(r, "log_loss")}${cell(r, "rmse_bins")}${cell(r, "auc")}</tr>`).join("")}
-      </tbody>
-    </table>
-    <p class="note" style="margin:18px 0 8px"><strong style="color:var(--text-secondary)">Published, for reference.</strong>
-      Measured on roughly 350 million reviews from 9,999 collections — ours is a
-      ${data.collections}-collection sample, so read the ordering, not the decimals.
+  host.innerHTML = `<table><thead><tr><th>what we tested</th>
+      <th>how wrong it is<br><span class="tech">log loss · lower is better</span></th>
+      <th>how honest it is<br><span class="tech">calibration · lower is better</span></th>
+      <th>can it tell them apart?<br><span class="tech">AUC · 0.50 is a coin flip</span></th></tr></thead>
+    <tbody>${rows.map((r) => `<tr class="${r.kind === "fitted" ? "ours" : ""}"><td>${r.name}</td>${cell(r, "log_loss")}${cell(r, "rmse_bins")}${cell(r, "auc")}</tr>`).join("")}</tbody></table>
+    <p class="note"><strong style="color:var(--text-secondary)">Published, for reference.</strong> Measured on roughly 350 million
+      reviews from 9,999 collections — ours is a ${data.collections}-collection sample, so read the ordering, not the decimals.
       These are not our numbers and we do not claim to have beaten them.</p>
-    <table>
-      <thead><tr><th>published results, for context</th>
-        <th class="tech">log loss</th><th class="tech">calibration</th><th class="tech">AUC</th></tr></thead>
-      <tbody>${Object.entries(published).map(([n, s]) =>
-        `<tr><td style="color:var(--text-muted)">${n}</td><td class="num" style="color:var(--text-muted)">${fmt(s.log_loss)}</td>
-        <td class="num" style="color:var(--text-muted)">${fmt(s.rmse_bins)}</td>
-        <td class="num" style="color:var(--text-muted)">${fmt(s.auc)}</td></tr>`).join("")}
-      </tbody>
-    </table>`;
+    <table><thead><tr><th>published results, for context</th><th class="tech">log loss</th><th class="tech">calibration</th><th class="tech">AUC</th></tr></thead>
+      <tbody>${Object.entries(data.published).map(([n, s]) => `<tr><td style="color:var(--text-muted)">${n}</td>
+        <td class="num" style="color:var(--text-muted)">${fmt(s.log_loss)}</td><td class="num" style="color:var(--text-muted)">${fmt(s.rmse_bins)}</td>
+        <td class="num" style="color:var(--text-muted)">${fmt(s.auc)}</td></tr>`).join("")}</tbody></table>`;
 
   const fitted = rows.find((r) => r.kind === "fitted") || rows[0];
   $("#proofStats").innerHTML = [
-    ["answers we tested it on", fitted.n.toLocaleString(), "none of which it had seen"],
+    ["answers tested on", fitted.n.toLocaleString(), "none of which it had seen"],
     ["real people", String(data.collections), "their actual study records"],
     ["how honest", fitted.rmse_bins.toFixed(3), "say 85%, and about 85% happen"],
-    ["beats guessing by", `${((fitted.auc - 0.5) * 200).toFixed(0)}%`, "on telling remembered from forgotten"],
-  ].map(([k, v, s]) => `<div class="stat"><div class="k">${k}</div><div class="v num">${v}</div>
-      <div class="k" style="text-transform:none;letter-spacing:0;font-weight:400;margin-top:3px">${s}</div></div>`).join("");
+    ["beats guessing by", `${((fitted.auc - 0.5) * 200).toFixed(0)}%`, "remembered vs forgotten"],
+  ].map(([k, v, s]) => `<div class="stat"><div class="k">${k}</div><div class="v num">${v}</div><div class="s">${s}</div></div>`).join("");
 
-  $("#proofNote").innerHTML =
-    "<strong>Why this is a fair test.</strong> For each person we picked a date, let Cutoff learn " +
-    "only from before it, and scored it only on after. It never saw a single answer it was asked " +
-    "to predict. We first tried splitting each flashcard separately instead — that quietly made " +
-    "the test easier, because a card's last few reviews are its easiest ones, and it flattered " +
-    "the score by three points. So we threw that version out.";
+  $("#proofNote").innerHTML = "<strong>Why this is a fair test.</strong> For each person we picked a date, let Cutoff learn " +
+    "only from before it, and scored it only on after. It never saw a single answer it was asked to predict. We first tried " +
+    "splitting each flashcard separately — that quietly made the test easier, because a card's last few reviews are its easiest " +
+    "ones, and it flattered the score by three points. So we threw that version out.";
 }
 
 const FINDINGS = [
   ["Duolingo's data has almost no forgetting curve.",
    "We started there — 12.85 million traces. Recall barely moves with time: 90.6% under a day, 86.8% after a month. The scheduler grants 58 days after a success and 10.4 after a lapse, so a long gap is a <em>reward for strength</em>, and the two effects cancel. Conditioning on repetition number brings the curve back. We moved the model to Anki logs, where people genuinely forget."],
   ["The 2016 model loses to predicting the average.",
-   "We implemented half-life regression from the ACL paper and reproduced its published baselines within a few points — then watched it score below chance on Anki data, because it has no notion of stability and so reads a long gap as weakness. That failure is the whole argument for a difficulty-stability-retrievability model."],
+   "We implemented half-life regression from the ACL paper and reproduced its published baselines within a few points — then watched it score below chance on Anki data, because it has no notion of stability and so reads a long gap as weakness. That failure is the whole argument for a difficulty–stability–retrievability model."],
   ["Cramming beats spacing for one fixed exam date.",
    "At identical effort, in our own model: 90.0% crammed against 75.4% spread evenly, and cramming still leads three months later. We are not going to tell you otherwise. What makes scheduling matter is that you cannot sit through six hundred cards the night before — and once each night has a limit, there is a last day you can start."],
 ];
 function renderFindings() {
   $("#findings").innerHTML = FINDINGS.map(([h, b]) => `
-    <div style="padding:16px 0;border-bottom:1px solid var(--border)">
-      <div style="font-weight:600;font-size:14.5px;margin-bottom:5px">${h}</div>
-      <div style="color:var(--text-secondary);font-size:13.5px;line-height:1.6">${b}</div>
-    </div>`).join("");
+    <div style="padding:14px 0;border-bottom:1px solid var(--border)">
+      <div style="font-weight:620;font-size:14px;margin-bottom:5px">${h}</div>
+      <div style="color:var(--text-secondary);font-size:13px;line-height:1.6">${b}</div></div>`).join("");
 }
 
-/* ------------------------------------------------------------- courses UI */
+/* ============================== the explainer ============================== */
+function renderExplainCurve() {
+  chart($("#explainCurve"), (svg, W, H) => {
+    const box = { x: 42, y: 14, w: W - 56, h: H - 40, min: 0.4, max: 1 };
+    if (box.w < 60 || box.h < 50) return;
+    grid(svg, box, [0.4, 0.7, 1], (t) => Math.round(t * 100) + "%");
+    const DAYS = 60;
+    const X = (d) => box.x + (d / DAYS) * box.w;
+    const Y = (r) => box.y + box.h - (r - box.min) / (box.max - box.min) * box.h;
+    const decay = (t, S) => Math.pow(1 + (Math.pow(0.9, -1 / 0.5) - 1) * t / S, -0.5);
+    for (const [S, colour, lab] of [[4, css("--series-1"), "barely learned"], [45, css("--series-2"), "properly stuck"]]) {
+      animate(el("path", { d: line(Array.from({ length: 60 }, (_, i) => [X(i), Y(decay(i, S))])), fill: "none",
+        stroke: colour, "stroke-width": 2.5, "stroke-linecap": "round" }, svg));
+      text(svg, X(DAYS) - 4, Y(decay(DAYS - 1, S)) - 9, lab, { anchor: "end", fill: colour, size: 12, weight: 620 });
+    }
+    axis(svg, box);
+    for (const d of [0, 30, 59]) text(svg, X(d), box.y + box.h + 17, d === 0 ? "today" : `${d + 1} days later`,
+      { anchor: d === 0 ? "start" : d === 59 ? "end" : "middle" });
+  });
+}
+
+/* ================================ courses ================================ */
 function renderCourses() {
   const total = state.courses.reduce((n, c) => n + (c.n || CARDS_PER_COURSE), 0);
   $("#percourse").textContent = total.toLocaleString();
@@ -768,24 +802,18 @@ function renderCourses() {
     <div class="course">
       <div><div class="name">${c.name}</div>
         <div class="meta">${c.topics ? `${c.topics} topics · ${c.n} facts` : `${c.n} facts`} · you say it's ${GRADE_WORDS[c.rating]}</div></div>
-      <div class="grades" data-i="${i}">
-        ${[1, 2, 3, 4].map((g) => `<button data-g="${g}" aria-pressed="${c.rating === g}">${g}</button>`).join("")}
-      </div>
+      <div class="grades" data-i="${i}">${[1, 2, 3, 4].map((g) => `<button data-g="${g}" aria-pressed="${c.rating === g}">${g}</button>`).join("")}</div>
     </div>`).join("");
-  document.querySelectorAll(".grades").forEach((row) => {
-    row.addEventListener("click", (e) => {
-      const b = e.target.closest("button"); if (!b) return;
-      state.courses[+row.dataset.i].rating = +b.dataset.g;
-      renderCourses();
-    });
-  });
+  $$(".grades").forEach((row) => row.addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    state.courses[+row.dataset.i].rating = +b.dataset.g;
+    renderCourses();
+  }));
 }
 
-/* ----------------------------------------------------------------- wiring */
+/* ================================= wiring ================================= */
 const api = async (path, body) => {
-  const r = await fetch(path, body ? {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-  } : {});
+  const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
   if (!r.ok) throw new Error(`${path} → ${r.status}`);
   return r.json();
 };
@@ -797,103 +825,196 @@ function daysToExam() {
   return Math.max(1, d);
 }
 
+/* --------------------------------- router --------------------------------- */
+const SCREENS = {
+  home:       ["Today", "Where you actually stand, in one cup."],
+  syllabus:   ["My syllabus", "What you're studying, and how well you know it. Everything else is computed from this."],
+  forecast:   ["What I'll forget", "Your syllabus, projected to the morning of the exam."],
+  deadline:   ["My cutoff", "The last day you can start and still get there."],
+  plan:       ["The plan", "The smallest schedule that reaches your target."],
+  twoexams:   ["Two exams", "Mid-sems and end-sems, competing for the same nights."],
+  focus:      ["Focus", "One session at a time. The cup fills while you work."],
+  howitworks: ["How it works", "Three ideas, and no maths."],
+  proof:      ["Can I trust it?", "Half a million real answers it had never seen."],
+};
 function showScreen(name) {
-  document.querySelectorAll("nav.tabs button").forEach((b) =>
-    b.setAttribute("aria-selected", String(b.dataset.screen === name)));
-  document.querySelectorAll("section.screen").forEach((s) =>
-    s.classList.toggle("active", s.id === "screen-" + name));
+  if (!SCREENS[name]) name = "home";
+  $$(".navbtn[data-screen]").forEach((b) => b.setAttribute("aria-current", String(b.dataset.screen === name)));
+  $$("section.screen").forEach((s) => s.classList.toggle("active", s.id === "screen-" + name));
+  $("#pageTitle").textContent = SCREENS[name][0];
+  $("#pageSub").textContent = SCREENS[name][1];
+  $("#scroller").scrollTop = 0;
   if (location.hash.slice(1) !== name) history.replaceState(null, "", "#" + name);
+  // charts in a hidden pane have no size; give them one now that they're visible
+  requestAnimationFrame(() => $$("#screen-" + name + " .plot").forEach(repaint));
+  if (name === "twoexams" && !frontierPoints && state.cards.length) runFrontier();
+}
+const wanted = () => (SCREENS[location.hash.slice(1)] ? location.hash.slice(1) : "home");
+
+/* ---------------------------------- rail ---------------------------------- */
+function setRail(collapsed) {
+  $("#rail").classList.toggle("collapsed", collapsed);
+  $("#railToggle").querySelector(".txt").textContent = collapsed ? "Show menu" : "Hide menu";
+  $("#railToggle").title = (collapsed ? "Show" : "Hide") + " the menu  ( [ )";
+  store.set("rail", collapsed);
+  setTimeout(() => $$(".screen.active .plot").forEach(repaint), 300);
 }
 
+/* ------------------------------- the render ------------------------------- */
+function renderAll() {
+  const { forecast, ceiling, plan, curves, days, target, cap } = state;
+  if (!forecast) return;
+  const dl = ceiling.latest_start_day;
+  const gone = dl === null;
+  const overall = figure(forecast.overall_recall, days);
+  const weakest = forecast.per_concept[0];
+
+  /* --- top bar --- */
+  $("#chipDays").innerHTML = `<span class="d" style="background:var(--series-2)"></span>exam in <b>${days} days</b>`;
+  $("#chipCutoff").innerHTML = gone
+    ? `<span class="d" style="background:var(--critical)"></span><b>cutoff passed</b>`
+    : `<span class="d" style="background:${dl > days * 0.4 ? "var(--good)" : dl > days * 0.15 ? "var(--warning)" : "var(--critical)"}"></span>start by <b>day ${dl}</b>`;
+  $("#focusDot").style.display = timer.running ? "block" : "none";
+
+  /* --- the cup --- */
+  renderCup(overall.b.mid, target, gone ? 0 : dl / days, gone);
+  $("#cupWords").textContent = state.exact ? pct(forecast.overall_recall) : overall.head;
+  $("#cupRange").innerHTML = `of your syllabus — <b>${scaleWord(overall.b.mid)}</b> — on exam morning, if you did nothing between now and then.<br>` + overall.sub;
+  renderScale($("#cupScale"), overall.b, target);
+  $("#cupStats").innerHTML = [
+    ["days you can wait", gone ? "0" : String(dl), gone ? "the window closed" : "before the target goes"],
+    ["your target", pct0(target), "on exam morning"],
+    ["facts tracked", state.cards.length.toLocaleString(), `across ${forecast.per_concept.length} subjects`],
+  ].map(([k, v, s]) => `<div class="stat"><div class="k">${k}</div><div class="v num">${v}</div><div class="s">${s}</div></div>`).join("");
+
+  /* --- verdict, on two screens --- */
+  const verdictHTML = gone
+    ? `<div class="verdict"><div class="big">${pct0(target)} is already out of reach.</div>
+       <div class="small">Even starting tonight and filling every night to ${cap} facts, the best you can reach is
+       ${state.exact ? pct(ceiling.ceiling_if_you_start_today) : `about ${pct0(band(ceiling.ceiling_if_you_start_today, days).mid)}`}.
+       The deadline passed before you opened this.</div></div>`
+    : `<div class="verdict ${dl > days * 0.5 ? "" : "ok"}"><div class="big">You have until day ${dl}.</div>
+       <div class="small">Start then and ${pct0(target)} is still reachable. Wait until day
+       ${ceiling.ceiling_if_you_wait_until_day.day} and your ceiling is
+       ${state.exact ? pct(ceiling.ceiling_if_you_wait_until_day.best_possible) : `about ${pct0(band(ceiling.ceiling_if_you_wait_until_day.best_possible, days).mid)}`}
+       — at maximum effort, and nothing closes it. The deadline is not the exam.</div></div>`;
+  $("#verdict").innerHTML = verdictHTML;
+  $("#verdict2").innerHTML = verdictHTML;
+
+  /* --- what to do tonight --- */
+  const first = plan.sessions[0];
+  const items = [];
+  items.push(gone
+    ? ["!", "Lower your target, or accept the ceiling.", `${pct0(target)} can't be reached any more. Flat out from tonight gets you about ${pct0(band(ceiling.ceiling_if_you_start_today, days).mid)}. That's the honest number.`, true]
+    : dl <= 3 ? ["!", "Start tonight.", `Your cutoff is day ${dl}. That's basically now.`, true]
+    : ["1", `Start by day ${dl}. Not before, not after.`, "Earlier mostly fades before the exam; later runs out of nights. Put it in your calendar today.", false]);
+  if (first) items.push(["2", `First session: ${first.cards} facts, about ${Math.round(first.minutes)} minutes.`,
+    `Mostly ${first.concepts.slice(0, 2).join(" and ")}. Not a whole evening — one sitting.`, false]);
+  items.push(["3", `Fix ${weakest.concept} first.`, `Weakest at ${scaleWord(band(weakest.recall, days).mid)}, so an hour there is worth more than an hour anywhere else.`, false]);
+  $("#todo").innerHTML = items.map(([n, t, d, hot]) =>
+    `<div class="todo ${hot ? "hot" : ""}"><div class="badge">${n}</div><div><div class="tt">${t}</div><div class="td">${d}</div></div></div>`).join("");
+
+  /* --- subject strip --- */
+  $("#subjectCards").innerHTML = forecast.per_concept.map((c) => {
+    const b = band(c.recall, days);
+    const h = b.mid >= target ? ["var(--good)", "fine"] : b.mid >= target - 0.15 ? ["var(--warning)", "slipping"] : ["var(--critical)", "needs you"];
+    const pips = [...Array(5)].map((_, i) => `<i style="background:${i < Math.round(b.mid * 5) ? h[0] : "rgba(255,235,212,.14)"}"></i>`).join("");
+    return `<div class="subj" title="${pct(c.recall)} raw · ${pct0(b.lo)}–${pct0(b.hi)} calibrated · ${c.n_cards} facts">
+      <div class="nm">${c.concept}</div><div class="pips">${pips}</div>
+      <div class="wd">${state.exact ? pct(c.recall) : scaleWord(b.mid)}</div>
+      <div class="st" style="color:${h[0]}">${h[1]} · ${state.exact ? "" : pct0(b.lo) + "–" + pct0(b.hi)}</div></div>`;
+  }).join("");
+
+  /* --- forecast screen --- */
+  $("#heroWords").textContent = state.exact ? pct(forecast.overall_recall) : overall.head;
+  $("#heroRange").innerHTML = `of your syllabus, on exam morning, if you did nothing between now and then. ` + overall.sub;
+  $("#forecastStats").innerHTML = [
+    ["days to exam", String(days), ""],
+    ["facts tracked", state.cards.length.toLocaleString(), ""],
+    ["weakest", forecast.weakest_concept, state.exact ? pct(weakest.recall) : scaleWord(band(weakest.recall, days).mid)],
+    ["you'd lose", state.exact ? pct0(1 - forecast.overall_recall) : `~${Math.round((1 - overall.b.mid) * 10)} in 10`, "of the syllabus"],
+  ].map(([k, v, s]) => `<div class="stat"><div class="k">${k}</div><div class="v" style="font-size:${String(v).length > 12 ? 15 : 20}px">${v}</div>${s ? `<div class="s">${s}</div>` : ""}</div>`).join("");
+  renderDecay(curves.series, days, forecast.weakest_concept);
+  $("#decayCaption").textContent = `Drawn by the memory model we trained, not by a chatbot. The scale starts at ` +
+    `${Math.round(decayFloor(curves.series) * 100)}% so the subjects separate instead of stacking in the top third.`;
+  renderConcepts(forecast.per_concept, days, target);
+
+  /* --- cutoff screen --- */
+  renderCeiling(ceiling, days, target);
+  $("#capEcho").textContent = String(cap);
+  $("#ceilingCaption").textContent = `Assumes ${cap} facts a night, every night, no days off — the absolute best case. ` +
+    `The scale starts at ${Math.round(ceilingFloor(ceiling, target) * 100)}% so the cliff is visible instead of flattened.`;
+  $("#ceilStats").innerHTML = [
+    ["if you start today", state.exact ? pct(ceiling.ceiling_if_you_start_today) : `~${pct0(band(ceiling.ceiling_if_you_start_today, days).mid)}`, "at maximum effort"],
+    [`if you wait to day ${ceiling.ceiling_if_you_wait_until_day.day}`, state.exact ? pct(ceiling.ceiling_if_you_wait_until_day.best_possible) : `~${pct0(band(ceiling.ceiling_if_you_wait_until_day.best_possible, days).mid)}`, "also at maximum effort"],
+    ["facts per night", String(cap), "your own number"],
+  ].map(([k, v, s]) => `<div class="stat"><div class="k">${k}</div><div class="v num">${v}</div><div class="s">${s}</div></div>`).join("");
+
+  const scrub = $("#startday");
+  scrub.max = String(Math.max(1, days - 1));
+  const updateScrub = () => {
+    const day = +scrub.value;
+    const host = $("#ceilingChart");
+    host._lastDay = day;
+    const p = host.moveMarker ? host.moveMarker(day) : null;
+    if (!p) return;
+    $("#scrubDay").textContent = p.start_day === 0 ? "if you start today" : `if you start on day ${p.start_day}`;
+    const ok = p.best_possible >= target;
+    const bb = band(p.best_possible, days);
+    $("#scrubVal").innerHTML = `<span style="color:${ok ? css("--good") : css("--critical")}">` +
+      `${state.exact ? pct(p.best_possible) : `${pct0(bb.lo)}–${pct0(bb.hi)}`}${ok ? "" : " — target gone"}</span>`;
+  };
+  scrub.oninput = updateScrub;
+  $("#ceilingChart")._afterPaint = updateScrub;   // the readout waits for the chart to exist
+  if (scrub.value === "0" || +scrub.value > days) scrub.value = String(gone ? 0 : dl);
+  updateScrub();
+
+  /* --- plan screen --- */
+  $("#planStats").innerHTML = [
+    ["from", state.exact ? pct0(plan.recall_before) : scaleWord(band(plan.recall_before, days).mid), ""],
+    ["to", state.exact ? pct0(plan.recall_after) : scaleWord(band(plan.recall_after, days).mid), ""],
+    ["total time", `${Math.round(plan.total_minutes)}<small> min</small>`, ""],
+    ["evenings", String(plan.sessions.length), ""],
+    ["reviews", plan.total_reviews.toLocaleString(), ""],
+    ["target met", plan.target_met ? "yes" : "no", plan.target_met ? "" : "not enough nights"],
+  ].map(([k, v, s]) => `<div class="stat"><div class="k">${k}</div><div class="v num">${v}</div>${s ? `<div class="s">${s}</div>` : ""}</div>`).join("");
+  renderPlan(plan, days);
+  $("#planCaption").textContent = plan.target_met
+    ? `${Math.round(plan.total_minutes)} minutes in total, across ${plan.sessions.length} evenings.`
+    : `Even flat out this only reaches ${pct0(plan.recall_after)} — there aren't enough nights left for your target.`;
+  $("#tonightBox").innerHTML = first
+    ? `<div class="readout"><div class="words" style="font-size:34px">${first.cards} facts</div>
+       <div class="rangeline">about <b>${Math.round(first.minutes)} minutes</b>, mostly ${first.concepts.slice(0, 2).join(" and ")}.
+       It's the session the planner wants from you first, on day ${first.day}.</div></div>`
+    : `<p class="sub">Nothing scheduled — you're already above target.</p>`;
+  renderFocusTarget();
+}
+
+/* --------------------------------- the run --------------------------------- */
 async function run({ navigate = false } = {}) {
-  const days = daysToExam();
-  const cap = +$("#cap").value || 40;
-  const target = +$("#target").value;
+  const days = daysToExam(), cap = +$("#cap").value || 40, target = +$("#target").value;
+  state.days = days; state.cap = cap; state.target = target;
 
   const items = state.courses.flatMap((c) =>
-    Array.from({ length: c.n || CARDS_PER_COURSE }, (_, i) =>
-      ({ card_id: `${c.name.slice(0, 4)}-${i}`, concept: c.name, rating: c.rating })));
+    Array.from({ length: c.n || CARDS_PER_COURSE }, (_, i) => ({ card_id: `${c.name.slice(0, 4)}-${i}`, concept: c.name, rating: c.rating })));
 
   const btn = $("#run"); btn.disabled = true; btn.textContent = "Computing…";
   try {
     state.cards = (await api("/api/calibrate", items)).cards;
     const payload = { cards: state.cards, days_to_exam: days, target_recall: target, max_reviews_per_day: cap };
-
     const [forecast, curves, ceiling, plan] = await Promise.all([
       api("/api/forecast", { cards: state.cards, days_to_exam: days }),
       api("/api/curves", { cards: state.cards, days_to_exam: days }),
       api("/api/ceiling", payload),
       api("/api/plan", payload),
     ]);
-    state.forecast = forecast; state.ceiling = ceiling; state.plan = plan;
-
-    // --- forecast screen
-    countUp($("#heroPct"), forecast.overall_recall, (v) => Math.round(v * 100) + "%");
-    $("#heroCap").innerHTML = `is what you'd still hold on exam morning, <strong style="color:var(--text-primary)">${days} days</strong> from today, if you did nothing between now and then.`;
-    $("#forecastStats").innerHTML = [
-      ["days to exam", days, ""],
-      ["facts tracked", (state.cards.length).toLocaleString(), ""],
-      ["weakest subject", forecast.weakest_concept, pct0(forecast.per_concept[0].recall)],
-      ["you'd lose", pct0(1 - forecast.overall_recall), "of the syllabus"],
-    ].map(([k, v, s]) => `<div class="stat"><div class="k">${k}</div>
-        <div class="v num" style="font-size:${String(v).length > 12 ? 17 : 25}px">${v}</div>
-        ${s ? `<div class="k" style="text-transform:none;letter-spacing:0;font-weight:400;margin-top:3px">${s}</div>` : ""}</div>`).join("");
-
-    renderDecay(curves.series, days, forecast.weakest_concept);
-    $("#decayCaption").textContent =
-      "Drawn by the memory model we trained, not by a chatbot. Hover anywhere to read off a day.";
-    renderConcepts(forecast.per_concept);
-
-    // --- deadline screen
-    renderDashboard(forecast, ceiling, plan, curves, days, target);
-    renderCeiling(ceiling, days, target);
-    const dl = ceiling.latest_start_day;
-    $("#ceilingCaption").textContent =
-      `Assumes ${cap} facts a night, every night, no days off — the absolute best case. ` +
-      `The scale starts at ${$("#ceilingChart").dataset.axisFloor}% so the drop is easy to see.`;
-    const todayCeil = ceiling.ceiling_if_you_start_today;
-    const lateCeil = ceiling.ceiling_if_you_wait_until_day;
-    $("#verdict").innerHTML = dl === null
-      ? `<div class="verdict"><div class="big">${pct0(target)} is already out of reach.</div>
-         <div class="small">Even starting tonight and filling every night to ${cap} cards, the best you can reach is ${pct(todayCeil)}. The deadline passed before you opened this.</div></div>`
-      : `<div class="verdict ${dl > days * 0.5 ? "" : "ok"}">
-         <div class="big">You have until day ${dl}.</div>
-         <div class="small">Start then and ${pct0(target)} is still reachable. Wait until day ${lateCeil.day} and your ceiling is ${pct(lateCeil.best_possible)} — at maximum effort, and nothing closes it. The deadline is not the exam.</div></div>`;
-
-    // The scrubber: drag a start day and watch the ceiling move with it.
-    const scrub = $("#startday");
-    scrub.max = String(Math.max(1, days - 1));
-    const updateScrub = () => {
-      const day = +scrub.value;
-      const p = $("#ceilingChart").moveMarker ? $("#ceilingChart").moveMarker(day) : null;
-      if (!p) return;
-      $("#scrubDay").textContent = p.start_day === 0 ? "if you start today" : `if you start on day ${p.start_day}`;
-      const reachable = p.best_possible >= target;
-      $("#scrubVal").innerHTML = `<span style="color:${reachable ? css("--good") : css("--critical")}">` +
-        `${pct(p.best_possible)}${reachable ? "" : " — target gone"}</span>`;
-    };
-    scrub.oninput = updateScrub;
-    scrub.value = String(dl === null ? 0 : dl);
-    updateScrub();
-
-    $("#planStats").innerHTML = [
-      ["from", pct0(plan.recall_before)],
-      ["to", pct0(plan.recall_after)],
-      ["total time", `${Math.round(plan.total_minutes)}<small> min</small>`],
-      ["study days", String(plan.sessions.length)],
-      ["reviews", plan.total_reviews.toLocaleString()],
-    ].map(([k, v]) => `<div class="stat"><div class="k">${k}</div><div class="v num">${v}</div></div>`).join("");
-    renderPlan(plan, days);
-    $("#planCaption").textContent = plan.target_met
-      ? `Each bar is one evening. ${Math.round(plan.total_minutes)} minutes in total, across ${plan.sessions.length} days, gets you to ${pct(plan.recall_after)}.`
-      : `Each bar is one evening. Even working flat out this only reaches ${pct(plan.recall_after)} — there aren't enough nights left for your target.`;
-
-    // Pressing the button must show a result. Booting must not skip the
-    // step where you tell it what you're studying.
-    const current = location.hash.slice(1);
-    const landing = navigate && (!current || current === "syllabus") ? "home" : wanted();
-    showScreen(landing);
-    if (landing === "twoexams") runFrontier();
+    Object.assign(state, { forecast, curves, ceiling, plan, isolate: null });
+    frontierPoints = null;
+    renderAll();
+    if (navigate) showScreen("home");
+    // a deep link to the two-exam screen arrives before the cards exist
+    if (location.hash.slice(1) === "twoexams") runFrontier();
+    requestAnimationFrame(() => $$(".screen.active .plot").forEach(repaint));
   } catch (err) {
     alert("Could not reach the model: " + err.message);
   } finally {
@@ -901,128 +1022,213 @@ async function run({ navigate = false } = {}) {
   }
 }
 
-/* -------------------------------------------------------- the two-exam run */
+/* ------------------------------- two exams ------------------------------- */
 let frontierPoints = null;
-
 async function runFrontier() {
-  if (!state.cards.length) { alert("Run the forecast first."); return; }
+  if (!state.cards.length) return;
   const first = +$("#exam1").value, second = +$("#exam2").value;
   const budget = Math.round(+$("#budget").value / 0.5);
   if (second <= first) { alert("The second exam has to come after the first."); return; }
-
   const btn = $("#runFrontier"); btn.disabled = true; btn.textContent = "Computing…";
   try {
     const data = await api("/api/frontier", {
-      cards: state.cards, first_exam_day: first, second_exam_day: second,
-      budget, max_reviews_per_day: +$("#cap").value || 40,
-      weights: [0, 0.3, 0.42, 0.48, 0.52, 0.58, 0.7, 1.0],
+      cards: state.cards, first_exam_day: first, second_exam_day: second, budget,
+      max_reviews_per_day: +$("#cap").value || 40, weights: [0, 0.3, 0.42, 0.48, 0.52, 0.58, 0.7, 1.0],
     });
     frontierPoints = renderFrontier(data);
-    $("#frontierCaption").textContent =
-      `Every dot is a real revision plan using the same ${Math.round(data.minutes)} minutes. ` +
-      `Up means better at mid-sems, right means better at end-sems — and you can't have both. ` +
-      `Grey dots are plans that lose at BOTH exams, so never pick one.`;
-
+    $("#frontierCaption").textContent = `Every dot is a real plan using the same ${Math.round(data.minutes)} minutes. ` +
+      `Up is better at mid-sems, right is better at end-sems. Grey dots lose at BOTH — never pick one. Click a dot to select it.`;
     const slider = $("#tradeoff");
     const update = () => {
       const w = +slider.value / 100;
-      const p = $("#frontierChart").moveMarker(w);
+      const host = $("#frontierChart");
+      host._lastWeight = w;
+      const p = host.moveMarker(w);
       $("#tradeGrid").innerHTML = `
-        <div class="tradecell"><div class="k">at mid-sems · day ${first}</div>
-          <div class="v num" style="color:var(--series-2)">${pct0(p.recall_first)}</div>
+        <div class="tradecell"><div class="k">mid-sems · day ${first}</div>
+          <div class="v num" style="color:var(--series-1)">${state.exact ? pct(p.recall_first) : pct0(band(p.recall_first, first).mid)}</div>
           <div class="s">${p.reviews_before_first} reviews before it</div></div>
-        <div class="tradecell"><div class="k">at end-sems · day ${second}</div>
-          <div class="v num" style="color:var(--series-1)">${pct0(p.recall_second)}</div>
+        <div class="tradecell"><div class="k">end-sems · day ${second}</div>
+          <div class="v num" style="color:var(--series-2)">${state.exact ? pct(p.recall_second) : pct0(band(p.recall_second, second).mid)}</div>
           <div class="s">${p.reviews_after_first} reviews after</div></div>`;
     };
     slider.oninput = update;
     update();
-
     const best = data.points.reduce((a, b) => (b.recall_first > a.recall_first ? b : a));
     const worst = data.points.reduce((a, b) => (b.recall_first < a.recall_first ? b : a));
     $("#frontierVerdict").innerHTML = `<div class="verdict">
       <div class="big">${pct0(best.recall_first)} then ${pct0(best.recall_second)} — or ${pct0(worst.recall_first)} then ${pct0(worst.recall_second)}.</div>
-      <div class="small">Identical nights. Identical effort. No schedule wins both, so this is a
-        choice you are making whether or not you know you are making it.</div></div>`;
+      <div class="small">Identical nights. Identical effort. No schedule wins both, so this is a choice you are
+        making whether or not you know you are making it.</div></div>`;
   } catch (err) {
     alert("Could not compute the frontier: " + err.message);
   } finally { btn.disabled = false; btn.textContent = "Compute the frontier"; }
 }
-$("#runFrontier").addEventListener("click", runFrontier);
 
-/* ------------------------------------------------------------------- boot */
-document.querySelectorAll("nav.tabs button").forEach((b) =>
-  b.addEventListener("click", () => {
-    showScreen(b.dataset.screen);
-    if (b.dataset.screen === "twoexams" && !frontierPoints && state.cards.length) runFrontier();
-  }));
-$("#run").addEventListener("click", () => run({ navigate: true }));
+/* ================================ the timer ================================
+   A focus clock that finishes in cups. Sessions are kept in this browser and
+   nowhere else — there is no account, and nothing leaves the page. */
+const timer = { minutes: store.get("preset", 25), left: store.get("preset", 25) * 60, running: false, endsAt: 0, tick: null };
+const todayKey = () => "cups." + new Date().toISOString().slice(0, 10);
 
-/* ---------------------------------------------------------- syllabus intake */
+function fmtClock(s) {
+  s = Math.max(0, Math.ceil(s));
+  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+}
+function renderDial() {
+  const frac = 1 - timer.left / (timer.minutes * 60);
+  chart($("#timerRing"), (svg, W, H) => {
+    const cx = W / 2, cy = H / 2, R = Math.min(W, H) / 2 - 12;
+    const C = 2 * Math.PI * R;
+    el("circle", { cx, cy, r: R, fill: "none", stroke: css("--border"), "stroke-width": 6 }, svg);
+    // the dial fills like a cup as the session runs
+    const clip = el("clipPath", { id: "dialclip" }, svg);
+    el("circle", { cx, cy, r: R - 5 }, clip);
+    const g = el("g", { "clip-path": "url(#dialclip)" }, svg);
+    const top = cy + R - 2 * R * clamp01(frac);
+    el("rect", { x: cx - R, y: top, width: 2 * R, height: 2 * R, fill: css("--series-1"), opacity: .17 }, g);
+    el("line", { x1: cx - R, x2: cx + R, y1: top, y2: top, stroke: css("--crema"), "stroke-width": 1.5, opacity: .5 }, g);
+    el("circle", { cx, cy, r: R, fill: "none", stroke: css("--series-1"), "stroke-width": 6, "stroke-linecap": "round",
+      transform: `rotate(-90 ${cx} ${cy})`, "stroke-dasharray": `${C * clamp01(frac)} ${C}` }, svg);
+  });
+  repaint($("#timerRing"));
+  $("#timerClock").textContent = fmtClock(timer.left);
+  $("#timerState").textContent = timer.running ? "brewing" : timer.left === timer.minutes * 60 ? "ready to brew" : "paused";
+  $("#timerStart").textContent = timer.running ? "Pause" : timer.left === timer.minutes * 60 ? "Start brewing" : "Resume";
+  document.title = timer.running ? `${fmtClock(timer.left)} · Cutoff` : "Cutoff — the last day you can still pass";
+  const dot = $("#focusDot"); if (dot) dot.style.display = timer.running ? "block" : "none";
+}
+function renderCups() {
+  const cups = store.get(todayKey(), { count: 0, minutes: 0 });
+  const glyphs = [...Array(Math.max(cups.count, 1))].map((_, i) => `
+    <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="${i < cups.count ? "var(--accent)" : "var(--border-strong)"}"
+      stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="opacity:${i < cups.count ? 1 : .35}">
+      <path d="M4 9h13v6a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z"/><path d="M17 11h1.6a2.4 2.4 0 0 1 0 4.8H17"/></svg>`).join("");
+  $("#cupsToday").innerHTML = `<div style="display:flex;gap:8px;flex-wrap:wrap">${glyphs}</div>`;
+  $("#focusStats").innerHTML = [
+    ["cups today", String(cups.count), cups.count ? "sessions finished" : "none yet"],
+    ["minutes focused", String(Math.round(cups.minutes)), "today"],
+  ].map(([k, v, s]) => `<div class="stat"><div class="k">${k}</div><div class="v num">${v}</div><div class="s">${s}</div></div>`).join("");
+}
+function renderFocusTarget() {
+  const first = state.plan && state.plan.sessions[0];
+  const cups = store.get(todayKey(), { count: 0, minutes: 0 });
+  if (!first) { $("#focusTarget").innerHTML = `<p class="sub">Run a forecast and the planner will tell you what tonight is for.</p>`; return; }
+  const done = Math.min(1, cups.minutes / Math.max(first.minutes, 1));
+  $("#focusTarget").innerHTML = `
+    <div class="readout"><div class="words" style="font-size:30px">${Math.round(first.minutes)} minutes</div>
+      <div class="rangeline">${first.cards} facts, mostly <b>${first.concepts.slice(0, 2).join(" and ")}</b>.</div>
+      <div class="scale"><div class="track"><div class="band" style="left:0;width:${(done * 100).toFixed(1)}%"></div></div>
+        <div class="ticks"><span>${Math.round(cups.minutes)} min done today</span><span>${Math.round(first.minutes)} min asked for</span></div></div></div>`;
+}
+function timerSet(minutes) {
+  timer.minutes = minutes; timer.left = minutes * 60; timer.running = false;
+  clearInterval(timer.tick); timer.tick = null;
+  store.set("preset", minutes);
+  $$("#presets button").forEach((b) => b.setAttribute("aria-pressed", String(+b.dataset.min === minutes)));
+  renderDial();
+}
+function timerToggle() {
+  if (timer.running) {
+    timer.running = false; clearInterval(timer.tick); timer.tick = null; renderDial(); return;
+  }
+  timer.running = true;
+  timer.endsAt = Date.now() + timer.left * 1000;          // wall clock, so a throttled tab stays honest
+  timer.tick = setInterval(() => {
+    timer.left = (timer.endsAt - Date.now()) / 1000;
+    if (timer.left <= 0) {
+      timer.left = 0; timer.running = false;
+      clearInterval(timer.tick); timer.tick = null;
+      const cups = store.get(todayKey(), { count: 0, minutes: 0 });
+      cups.count += 1; cups.minutes += timer.minutes;
+      store.set(todayKey(), cups);
+      renderCups(); renderFocusTarget();
+      $("#timerState").textContent = "cup finished";
+    }
+    renderDial();
+  }, 250);
+  renderDial();
+}
+
+/* ============================ syllabus intake ============================ */
 function applyDensity() {
   for (const c of state.courses) if (c.topics) c.n = c.topics * density();
   renderCourses();
 }
-
 async function readSyllabus({ seedRatings = false } = {}) {
-  const text = $("#syllabusText").value.trim();
+  const textv = $("#syllabusText").value.trim();
   const note = $("#ingestNote");
-  if (!text) { note.className = "ingest-note bad"; note.textContent = "Paste something first."; return; }
-
+  if (!textv) { note.className = "ingest-note bad"; note.textContent = "Paste something first."; return; }
   const btn = $("#readSyllabus"); btn.disabled = true; btn.textContent = "Reading…";
   note.className = "ingest-note"; note.textContent = "";
   try {
-    const out = await api("/api/ingest", { text });
+    const out = await api("/api/ingest", { text: textv });
     state.courses = out.subjects.map((s) => ({
-      name: s.name,
-      rating: seedRatings ? (SAMPLE_RATINGS[s.name] || 3) : 3,
-      topics: s.n_items,
-      n: s.n_items * density(),
-      items: s.items,
+      name: s.name, rating: seedRatings ? (SAMPLE_RATINGS[s.name] || 3) : 3,
+      topics: s.n_items, n: s.n_items * density(), items: s.items,
     }));
     renderCourses();
     const total = out.n_items * density();
     const who = out.source === "gemini" ? "Gemini read it" : "Read by the built-in parser";
-    note.innerHTML = `${who}: <strong>${out.n_subjects} subjects</strong>, ` +
-      `<strong>${out.n_items.toLocaleString()} topics</strong> — ` +
-      `<strong>${total.toLocaleString()} facts</strong> at ${density()} per line. ` +
-      `It only split the text up. Every number after this is computed by the memory model.`;
-  } catch (e) {
+    note.innerHTML = `${who}: <strong>${out.n_subjects} subjects</strong>, <strong>${out.n_items.toLocaleString()} topics</strong> — ` +
+      `<strong>${total.toLocaleString()} facts</strong> at ${density()} per line. It only split the text up. ` +
+      `Every number after this is computed by the memory model.`;
+  } catch {
     note.className = "ingest-note bad";
     note.textContent = "Couldn't find any subjects in that. Try pasting the syllabus with its headings.";
-  } finally {
-    btn.disabled = false; btn.textContent = "Read my syllabus →";
-  }
+  } finally { btn.disabled = false; btn.textContent = "Read my syllabus →"; }
 }
+
+/* ================================== boot ================================== */
+$$(".navbtn[data-screen]").forEach((b) => b.addEventListener("click", () => showScreen(b.dataset.screen)));
+$("#railToggle").addEventListener("click", () => setRail(!$("#rail").classList.contains("collapsed")));
+$("#run").addEventListener("click", () => run({ navigate: true }));
+$("#runFrontier").addEventListener("click", runFrontier);
 $("#readSyllabus").addEventListener("click", () => readSyllabus());
-$("#sampleSyllabus").addEventListener("click", () => {
-  $("#syllabusText").value = SAMPLE_SYLLABUS;
-  readSyllabus({ seedRatings: true });
-});
+$("#sampleSyllabus").addEventListener("click", () => { $("#syllabusText").value = SAMPLE_SYLLABUS; readSyllabus({ seedRatings: true }); });
 $("#density").addEventListener("change", applyDensity);
 $("#addcourse").addEventListener("click", () => {
   const name = prompt("Subject name?");
   if (name) { state.courses.push({ name, rating: 3, n: CARDS_PER_COURSE }); renderCourses(); }
 });
-
-const SCREENS = ["home", "syllabus", "forecast", "deadline", "twoexams", "howitworks", "proof"];
-const wanted = () => (SCREENS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "syllabus");
+$("#exactToggle").addEventListener("click", () => {
+  state.exact = !state.exact;
+  store.set("exact", state.exact);
+  $("#exactToggle").setAttribute("aria-pressed", String(state.exact));
+  $("#exactToggle").textContent = state.exact ? "showing exact" : "exact figures";
+  renderAll();
+  $$(".screen.active .plot").forEach(repaint);
+});
+$$("#presets button").forEach((b) => b.addEventListener("click", () => timerSet(+b.dataset.min)));
+$("#timerStart").addEventListener("click", timerToggle);
+$("#timerReset").addEventListener("click", () => timerSet(timer.minutes));
+$("#brewFromPlan").addEventListener("click", () => {
+  const first = state.plan && state.plan.sessions[0];
+  if (first) timerSet(Math.max(15, Math.min(60, Math.round(first.minutes / 5) * 5)));
+  showScreen("focus");
+});
+addEventListener("keydown", (e) => {
+  if (e.target.matches("input, textarea, select")) return;
+  if (e.key === "[") { setRail(!$("#rail").classList.contains("collapsed")); }
+  if (e.key === " " && document.querySelector("#screen-focus.active")) { e.preventDefault(); timerToggle(); }
+});
+addEventListener("hashchange", () => showScreen(wanted()));
+addEventListener("resize", () => $$(".screen.active .plot").forEach(repaint));
 
 (function init() {
   const d = new Date(); d.setDate(d.getDate() + 87);
   $("#examdate").value = d.toISOString().slice(0, 10);
+  setRail(store.get("rail", false));
+  $("#exactToggle").setAttribute("aria-pressed", String(state.exact));
+  $("#exactToggle").textContent = state.exact ? "showing exact" : "exact figures";
   renderCourses();
   renderFindings();
-  api("/api/proof").then(renderProof).catch(() => {
-    $("#proofTable").textContent = "Benchmark artifact not found — run scripts/benchmark.py.";
-  });
-  api("/api/calibration").then(renderCalibration).catch(() => {
-    $("#calChart").textContent = "Calibration artifact not found — run scripts/calibration.py.";
-  });
-  // Land on a populated page. Nobody should have to press a button to see
-  // whether the thing works, least of all a judge with two minutes.
   renderExplainCurve();
+  timerSet(timer.minutes);
+  renderCups();
+  renderFocusTarget();
+  api("/api/calibration").then(renderCalibration).catch(() => { $("#calChart").textContent = "Calibration artifact not found — run scripts/calibration.py."; });
+  api("/api/proof").then(renderProof).catch(() => { $("#proofTable").textContent = "Benchmark artifact not found — run scripts/benchmark.py."; });
   showScreen(wanted());
-  run();
-  addEventListener("hashchange", () => showScreen(wanted()));
+  run();      // land on a populated page; nobody should press a button to see whether it works
 })();
