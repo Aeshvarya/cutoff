@@ -70,7 +70,7 @@ of Cutoff is that the number has something behind it.
 ## The interface
 
 Nine screens rather than one long page: **Today** (your whole semester as one
-cup — how full it is on exam morning, and a ring showing how much of your window
+gauge — your score on exam morning, and a ring showing how much of your window
 is left), **My syllabus**, **What I'll forget**, **My cutoff**, **The plan**,
 **Two exams**, **Focus**, **How it works**, **Can I trust it?**
 
