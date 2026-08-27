@@ -344,10 +344,16 @@ def proof() -> dict:
 # No bundler: a build step is deployment risk we do not need, and the charts
 # are hand-drawn SVG rather than a chart library.
 if WEB.exists():
+    # no-store, deliberately. The interface is two small files and there is no
+    # build step to fingerprint them, so a cached app.js paired with a fresh
+    # index.html would leave a judge clicking a menu that no longer has any
+    # handlers attached. Correctness beats a few kilobytes.
+    NO_STORE = {"Cache-Control": "no-store"}
+
     @app.get("/app.js")
     def app_js() -> FileResponse:
-        return FileResponse(WEB / "app.js", media_type="application/javascript")
+        return FileResponse(WEB / "app.js", media_type="application/javascript", headers=NO_STORE)
 
     @app.get("/")
     def index() -> FileResponse:
-        return FileResponse(WEB / "index.html")
+        return FileResponse(WEB / "index.html", headers=NO_STORE)
