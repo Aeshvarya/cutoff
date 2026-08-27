@@ -255,92 +255,151 @@ function grid(svg, box, ticks, fmt) {
 const axis = (svg, box) => el("line", { x1: box.x, x2: box.x + box.w, y1: box.y + box.h, y2: box.y + box.h,
   stroke: css("--border-strong"), "stroke-width": 1 }, svg);
 
-/* ================================ the cup ================================
+/* ================================ the gauge ================================
+   A warm radial gauge replaces the coffee mug.
    Level    = what you'd hold on exam morning (the calibrated middle).
    Dashes   = the target you asked for.
    Ring     = how much of your window is left before the cutoff.
-   Steam    = you are above target. It stops when you are not.
-   Every one of those is labelled in words underneath — the cup is a picture
+   Sparkles = you are above target. They stop when you are not.
+   Every one of those is labelled in words underneath — the gauge is a picture
    of numbers that are also written down, never the only place they appear. */
 function renderCup(level, target, ringFrac, cold) {
   chart($("#cupChart"), (svg, W, H) => {
-    const size = Math.min(W, H * 0.98);
-    const cx = W / 2, cy = H / 2;
-    const R = size / 2 - 6;                      // the urgency ring
-    const cupW = R * 1.16, cupH = R * 1.2;
-    const x0 = cx - cupW / 2, y0 = cy - cupH * 0.46, y1 = y0 + cupH;
-    const taper = cupW * 0.1;
+    const size = Math.min(W, H * 0.92);
+    const cx = W / 2, cy = H / 2 + size * 0.04;
+    const R = size / 2 - 12;
 
-    // --- ring ---
-    const ringCol = cold ? css("--critical") : ringFrac > 0.35 ? css("--good") : ringFrac > 0.12 ? css("--warning") : css("--critical");
-    const C = 2 * Math.PI * R;
-    el("circle", { cx, cy, r: R, fill: "none", stroke: css("--border"), "stroke-width": 3 }, svg);
-    const arc = el("circle", { cx, cy, r: R, fill: "none", stroke: ringCol, "stroke-width": 3,
-      "stroke-linecap": "round", transform: `rotate(-90 ${cx} ${cy})`,
-      "stroke-dasharray": `${C * clamp01(ringFrac)} ${C}` }, svg);
-    arc.style.transition = "stroke-dasharray .6s ease";
+    // gradient definitions
+    const defs = el("defs", {}, svg);
 
-    // --- saucer ---
-    el("ellipse", { cx, cy: y1 + 16, rx: cupW * 0.78, ry: 7, fill: "none", stroke: css("--border-strong"), "stroke-width": 1.5 }, svg);
+    // warm fill gradient for the level arc
+    const grad = el("linearGradient", { id: "gaugeGrad", x1: "0%", y1: "100%", x2: "100%", y2: "0%" }, defs);
+    if (cold) {
+      el("stop", { offset: "0%", "stop-color": "#5b4f47" }, grad);
+      el("stop", { offset: "100%", "stop-color": "#7a6b5f" }, grad);
+    } else {
+      el("stop", { offset: "0%", "stop-color": "#c47131" }, grad);
+      el("stop", { offset: "50%", "stop-color": "#dda45e" }, grad);
+      el("stop", { offset: "100%", "stop-color": "#e8c9a0" }, grad);
+    }
 
-    // --- body ---
-    const body = `M${x0},${y0} L${x0 + taper},${y1 - 14} Q${x0 + taper},${y1} ${x0 + taper + 14},${y1}
-                  L${x0 + cupW - taper - 14},${y1} Q${x0 + cupW - taper},${y1} ${x0 + cupW - taper},${y1 - 14}
-                  L${x0 + cupW},${y0} Z`;
-    const clip = el("clipPath", { id: "cupclip" }, svg);
-    el("path", { d: body }, clip);
+    // glow filter for the level arc
+    const glow = el("filter", { id: "gaugeGlow", x: "-30%", y: "-30%", width: "160%", height: "160%" }, defs);
+    el("feGaussianBlur", { in: "SourceGraphic", stdDeviation: cold ? "2" : "5", result: "blur" }, glow);
+    const merge = el("feMerge", {}, glow);
+    el("feMergeNode", { in: "blur" }, merge);
+    el("feMergeNode", { in: "SourceGraphic" }, merge);
 
-    // --- liquid ---
-    const inner = y1 - y0 - 10;
-    const lv = clamp01(level);
-    const surface = y1 - 6 - inner * lv;
-    const g = el("g", { "clip-path": "url(#cupclip)" }, svg);
-    el("rect", { x: x0 - 4, y: surface, width: cupW + 8, height: y1 - surface + 6,
-      fill: cold ? css("--context") : css("--series-1"), opacity: cold ? 0.55 : 0.92 }, g);
-    // crema: the lighter skin on top, and a wave so it reads as liquid
-    const amp = Math.max(2.5, cupW * 0.022);
-    const wave = (o) => {
-      let d = `M${x0 - 8},${surface + o}`;
-      for (let i = 0; i <= 8; i++) {
-        const step = (cupW + 16) / 8;
-        d += ` q${step / 2},${(i % 2 ? 1 : -1) * amp} ${step},0`;
-      }
-      return d + ` L${x0 + cupW + 8},${y1 + 8} L${x0 - 8},${y1 + 8} Z`;
+    // inner glow for the centre
+    const innerGlow = el("radialGradient", { id: "centreGlow", cx: "50%", cy: "50%", r: "50%" }, defs);
+    el("stop", { offset: "0%", "stop-color": cold ? "rgba(91,79,71,.12)" : "rgba(196,113,49,.1)" }, innerGlow);
+    el("stop", { offset: "100%", "stop-color": "transparent" }, innerGlow);
+
+    const trackW = Math.max(10, R * 0.1);
+    const arcR = R - trackW / 2;
+
+    // --- the sweep: 270° arc (from 135° to 405° i.e. bottom-left to bottom-right) ---
+    const startAngle = 135;
+    const totalSweep = 270;
+
+    const describeArc = (cx, cy, r, startDeg, endDeg) => {
+      const s = (startDeg * Math.PI) / 180;
+      const e = (endDeg * Math.PI) / 180;
+      const sx = cx + r * Math.cos(s), sy = cy + r * Math.sin(s);
+      const ex = cx + r * Math.cos(e), ey = cy + r * Math.sin(e);
+      const large = endDeg - startDeg > 180 ? 1 : 0;
+      return \`M\${sx},\${sy} A\${r},\${r} 0 \${large} 1 \${ex},\${ey}\`;
     };
-    el("path", { d: wave(0), fill: cold ? css("--context") : css("--crema"), opacity: cold ? .5 : .34 }, g);
-    if (lv > 0.02) el("path", { d: wave(3), fill: cold ? css("--context") : css("--series-1"), opacity: .9 }, g);
 
-    // --- target line, drawn on the glass ---
-    const ty = y1 - 6 - inner * clamp01(target);
-    el("line", { x1: x0 - 2, x2: x0 + cupW + 2, y1: ty, y2: ty, stroke: css("--crema"),
-      "stroke-width": 1.5, "stroke-dasharray": "5 5", opacity: .85 }, svg);
-    text(svg, x0 + 7, ty - 6, "target", { fill: css("--crema"), size: 11, weight: 600 });
+    // centre warm glow disc
+    el("circle", { cx, cy, r: arcR - trackW * 0.8, fill: "url(#centreGlow)" }, svg);
 
-    // --- outline + handle, on top of the liquid ---
-    el("path", { d: body, fill: "none", stroke: css("--text-secondary"), "stroke-width": 2, "stroke-linejoin": "round" }, svg);
-    el("path", { d: `M${x0 + cupW - 2},${y0 + inner * 0.22} q${cupW * 0.3},${inner * 0.06} ${cupW * 0.24},${inner * 0.28}
-                     q-${cupW * 0.02},${inner * 0.2} -${cupW * 0.26},${inner * 0.2}`,
-      fill: "none", stroke: css("--text-secondary"), "stroke-width": 2, "stroke-linecap": "round" }, svg);
+    // track (background)
+    el("path", { d: describeArc(cx, cy, arcR, startAngle, startAngle + totalSweep),
+      fill: "none", stroke: css("--border"), "stroke-width": trackW, "stroke-linecap": "round" }, svg);
 
-    // --- steam ---
+    // level fill arc
+    const lv = clamp01(level);
+    const levelEnd = startAngle + totalSweep * lv;
+    if (lv > 0.01) {
+      const lvArc = el("path", { d: describeArc(cx, cy, arcR, startAngle, levelEnd),
+        fill: "none", stroke: "url(#gaugeGrad)", "stroke-width": trackW, "stroke-linecap": "round",
+        filter: "url(#gaugeGlow)" }, svg);
+      lvArc.style.transition = "d .6s ease";
+    }
+
+    // target tick mark
+    const tgtAngle = startAngle + totalSweep * clamp01(target);
+    const tgtRad = (tgtAngle * Math.PI) / 180;
+    const tInner = arcR - trackW * 0.9;
+    const tOuter = arcR + trackW * 0.9;
+    el("line", {
+      x1: cx + tInner * Math.cos(tgtRad), y1: cy + tInner * Math.sin(tgtRad),
+      x2: cx + tOuter * Math.cos(tgtRad), y2: cy + tOuter * Math.sin(tgtRad),
+      stroke: css("--crema"), "stroke-width": 2.5, "stroke-linecap": "round", opacity: .9
+    }, svg);
+    // target label
+    const tLabelR = tOuter + 14;
+    const tLx = cx + tLabelR * Math.cos(tgtRad);
+    const tLy = cy + tLabelR * Math.sin(tgtRad);
+    text(svg, tLx, tLy + 4, "target", { fill: css("--crema"), size: 10.5, weight: 600,
+      anchor: tgtAngle > 270 ? "start" : tgtAngle < 180 ? "end" : "middle" });
+
+    // --- outer urgency ring (thinner, behind everything) ---
+    const ringR = R + 4;
+    const ringCol = cold ? css("--critical") : ringFrac > 0.35 ? css("--good") : ringFrac > 0.12 ? css("--warning") : css("--critical");
+    el("path", { d: describeArc(cx, cy, ringR, startAngle, startAngle + totalSweep),
+      fill: "none", stroke: css("--border"), "stroke-width": 2.5, "stroke-linecap": "round" }, svg);
+    if (ringFrac > 0.005) {
+      const ringEnd = startAngle + totalSweep * clamp01(ringFrac);
+      const rArc = el("path", { d: describeArc(cx, cy, ringR, startAngle, ringEnd),
+        fill: "none", stroke: ringCol, "stroke-width": 2.5, "stroke-linecap": "round" }, svg);
+      rArc.style.transition = "d .6s ease";
+    }
+
+    // --- centre score text ---
+    const scorePct = Math.round(lv * 100);
+    const scoreT = text(svg, cx, cy + 2, scorePct + "%", {
+      fill: cold ? css("--text-muted") : css("--text-primary"),
+      size: Math.max(24, R * 0.34), weight: 700, anchor: "middle"
+    });
+    scoreT.setAttribute("font-family", css("--display"));
+    scoreT.setAttribute("letter-spacing", "-.03em");
+
+    // "on exam morning" sub-label
+    text(svg, cx, cy + Math.max(18, R * 0.2), "on exam morning", {
+      fill: css("--text-muted"), size: Math.max(10, R * 0.1), anchor: "middle"
+    });
+
+    // --- sparkles when above target ---
     if (!cold && level >= target) {
       const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
-      [-0.22, 0, 0.22].forEach((off, i) => {
-        const sx = cx + cupW * off;
-        const p = el("path", { d: `M${sx},${y0 - 8} q10,-14 0,-26 q-10,-14 0,-24`, fill: "none",
-          stroke: css("--crema"), "stroke-width": 2, "stroke-linecap": "round", opacity: .32 }, svg);
+      const sparkleCount = 6;
+      for (let i = 0; i < sparkleCount; i++) {
+        const angle = startAngle + totalSweep * (0.3 + Math.random() * 0.65);
+        const rad = (angle * Math.PI) / 180;
+        const dist = arcR + trackW * (0.4 + Math.random() * 1.2);
+        const sx = cx + dist * Math.cos(rad);
+        const sy = cy + dist * Math.sin(rad);
+        const sparkle = el("circle", { cx: sx, cy: sy, r: 1.5 + Math.random() * 1.5,
+          fill: css("--crema"), opacity: .5 }, svg);
         if (!still) {
-          p.style.animation = `steam 3.${i * 3}s ease-in-out ${i * 0.5}s infinite`;
-          p.style.transformOrigin = `${sx}px ${y0}px`;
+          sparkle.style.animation = \`sparkle \${2 + Math.random() * 2}s ease-in-out \${Math.random() * 2}s infinite\`;
+          sparkle.style.transformOrigin = \`\${sx}px \${sy}px\`;
         }
-      });
+      }
     }
+
+    // --- bottom scale labels ---
+    const bottomY = cy + arcR + trackW + 26;
+    text(svg, cx - arcR * 0.85, bottomY, "0%", { fill: css("--text-muted"), size: 11, anchor: "start" });
+    text(svg, cx + arcR * 0.85, bottomY, "100%", { fill: css("--text-muted"), size: 11, anchor: "end" });
   });
 }
-// keyframes for the steam, injected once so the stylesheet stays about layout
+// keyframes for the sparkles, injected once
 if (!document.getElementById("cupkf")) {
   const s = document.createElement("style"); s.id = "cupkf";
-  s.textContent = "@keyframes steam{0%{opacity:0;transform:translateY(6px) scaleY(.9)}35%{opacity:.4}100%{opacity:0;transform:translateY(-14px) scaleY(1.15)}}";
+  s.textContent = "@keyframes sparkle{0%{opacity:0;transform:scale(.5)}50%{opacity:.7;transform:scale(1.3)}100%{opacity:0;transform:scale(.5)}}";
   document.head.append(s);
 }
 
