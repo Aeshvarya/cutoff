@@ -2,13 +2,13 @@
  "collections": 40,
  "base_rate": 0.8506108201384004,
  "ours": {
-  "Ebb (DSR, fitted)": {
+  "Cutoff (DSR, fitted)": {
    "n": 520243,
-   "log_loss": 0.47696051801245715,
-   "rmse_bins": 0.054197919980884086,
-   "auc": 0.6949808821252765
+   "log_loss": 0.47642373227115403,
+   "rmse_bins": 0.052739703728345286,
+   "auc": 0.6965374230983055
   },
-  "Ebb (DSR, unfitted defaults)": {
+  "Cutoff (DSR, unfitted defaults)": {
    "n": 520243,
    "log_loss": 0.6484180885522143,
    "rmse_bins": 0.2687211869294544,
@@ -16,9 +16,9 @@
   },
   "HLR (ACL 2016, ours)": {
    "n": 520243,
-   "log_loss": 0.9687544596544091,
-   "rmse_bins": 0.34313007572567034,
-   "auc": 0.4792848948535745
+   "log_loss": 0.9671704937151789,
+   "rmse_bins": 0.3426326244718182,
+   "auc": 0.47939986645909854
   },
   "AVG (predict the mean)": {
    "n": 520243,
