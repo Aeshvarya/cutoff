@@ -267,7 +267,9 @@ function renderCup(level, target, ringFrac, cold) {
   chart($("#cupChart"), (svg, W, H) => {
     const size = Math.min(W, H * 0.92);
     const cx = W / 2, cy = H / 2 + size * 0.04;
-    const R = size / 2 - 12;
+    // room for the urgency ring outside the gauge and for the target label
+    // outside that -- both were being clipped by the plot's own edge
+    const R = size / 2 - 28;
 
     // gradient definitions
     const defs = el("defs", {}, svg);
@@ -339,14 +341,15 @@ function renderCup(level, target, ringFrac, cold) {
       stroke: css("--crema"), "stroke-width": 2.5, "stroke-linecap": "round", opacity: .9
     }, svg);
     // target label
-    const tLabelR = tOuter + 14;
-    const tLx = cx + tLabelR * Math.cos(tgtRad);
-    const tLy = cy + tLabelR * Math.sin(tgtRad);
-    text(svg, tLx, tLy + 4, "target", { fill: css("--crema"), size: 10.5, weight: 600,
-      anchor: tgtAngle > 270 ? "start" : tgtAngle < 180 ? "end" : "middle" });
+    const tLabelR = tOuter + 13;
+    // keep the label inside the plot: at a high target the tick sits hard right
+    // and the word was being cut in half by the edge of the box
+    const tLx = Math.max(28, Math.min(W - 28, cx + tLabelR * Math.cos(tgtRad)));
+    const tLy = Math.max(12, Math.min(H - 6, cy + tLabelR * Math.sin(tgtRad)));
+    text(svg, tLx, tLy + 4, "target", { fill: css("--crema"), size: 10.5, weight: 600, anchor: "middle" });
 
     // --- outer urgency ring (thinner, behind everything) ---
-    const ringR = R + 4;
+    const ringR = R + 12;
     const ringCol = cold ? css("--critical") : ringFrac > 0.35 ? css("--good") : ringFrac > 0.12 ? css("--warning") : css("--critical");
     el("path", { d: describeArc(cx, cy, ringR, startAngle, startAngle + totalSweep),
       fill: "none", stroke: css("--border"), "stroke-width": 2.5, "stroke-linecap": "round" }, svg);
@@ -358,10 +361,13 @@ function renderCup(level, target, ringFrac, cold) {
     }
 
     // --- centre score text ---
-    const scorePct = Math.round(lv * 100);
-    const scoreT = text(svg, cx, cy + 2, scorePct + "%", {
+    // The gauge quotes the figure the same way the rest of the app does: a
+    // rounded scale unless you asked for exact, so the centre of the gauge can
+    // never disagree with the sentence next to it.
+    const centre = state.exact ? pct(lv) : Math.round(lv * 10) + " in 10";
+    const scoreT = text(svg, cx, cy + 2, centre, {
       fill: cold ? css("--text-muted") : css("--text-primary"),
-      size: Math.max(24, R * 0.34), weight: 700, anchor: "middle"
+      size: Math.max(20, R * (state.exact ? 0.3 : 0.26)), weight: 700, anchor: "middle"
     });
     scoreT.setAttribute("font-family", css("--display"));
     scoreT.setAttribute("letter-spacing", "-.03em");
@@ -902,7 +908,7 @@ function daysToExam() {
 
 /* --------------------------------- router --------------------------------- */
 const SCREENS = {
-  home:       ["Today", "Where you actually stand, in one cup."],
+  home:       ["Today", "Where you actually stand, on one dial."],
   syllabus:   ["My syllabus", "What you're studying, and how well you know it. Everything else is computed from this."],
   forecast:   ["What I'll forget", "Your syllabus, projected to the morning of the exam."],
   deadline:   ["My cutoff", "The last day you can start and still get there."],
@@ -959,7 +965,7 @@ function renderAll() {
   $("#focusDot").style.display = timer.running ? "block" : "none";
 
   /* --- the cup --- */
-  renderCup(overall.b.mid, target, gone ? 0 : dl / days, gone);
+  renderCup(state.exact ? forecast.overall_recall : overall.b.mid, target, gone ? 0 : dl / days, gone);
   $("#cupWords").textContent = state.exact ? pct(forecast.overall_recall) : overall.head;
   $("#cupRange").innerHTML = `of your syllabus — <b>${scaleWord(overall.b.mid)}</b> — on exam morning, if you did nothing between now and then.<br>` + overall.sub;
   renderScale($("#cupScale"), overall.b, target);
