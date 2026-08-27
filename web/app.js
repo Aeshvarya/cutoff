@@ -308,7 +308,7 @@ function renderCup(level, target, ringFrac, cold) {
       const sx = cx + r * Math.cos(s), sy = cy + r * Math.sin(s);
       const ex = cx + r * Math.cos(e), ey = cy + r * Math.sin(e);
       const large = endDeg - startDeg > 180 ? 1 : 0;
-      return \`M\${sx},\${sy} A\${r},\${r} 0 \${large} 1 \${ex},\${ey}\`;
+      return `M${sx},${sy} A${r},${r} 0 ${large} 1 ${ex},${ey}`;
     };
 
     // centre warm glow disc
@@ -384,8 +384,8 @@ function renderCup(level, target, ringFrac, cold) {
         const sparkle = el("circle", { cx: sx, cy: sy, r: 1.5 + Math.random() * 1.5,
           fill: css("--crema"), opacity: .5 }, svg);
         if (!still) {
-          sparkle.style.animation = \`sparkle \${2 + Math.random() * 2}s ease-in-out \${Math.random() * 2}s infinite\`;
-          sparkle.style.transformOrigin = \`\${sx}px \${sy}px\`;
+          sparkle.style.animation = `sparkle ${2 + Math.random() * 2}s ease-in-out ${Math.random() * 2}s infinite`;
+          sparkle.style.transformOrigin = `${sx}px ${sy}px`;
         }
       }
     }
