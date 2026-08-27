@@ -2,583 +2,810 @@
 <html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Cutoff — the last day you can still pass</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Inter+Tight:wght@300..700&display=swap">
 <style>
-/* ---------------------------------------------------------------
-   Tokens. Chart colors come from a validated categorical palette;
-   status colors are reserved and never used to mean "series 4".
-   --------------------------------------------------------------- */
+/* ===================================================================
+   Cutoff — a late-night café at 1am, rendered in a browser.
+
+   Colour rules that survive the redesign:
+   - Chart series colours are a VALIDATED categorical pair (roast /
+     porcelain). Run: node validate_palette.js "#c47131,#3890d2"
+     --mode dark --surface "#241d18"  → all six checks pass.
+   - Status colours (good/warning/critical) are reserved. They never
+     mean "series 3", and they never carry meaning alone: there is
+     always a word next to them.
+   - Nothing glows. This is a dim room, not a nightclub.
+   =================================================================== */
 :root {
   color-scheme: dark;
-  --bg:            #0d0d0c;
-  --surface-1:     #1a1a19;   /* the surface the charts are validated against */
-  --surface-2:     #232320;
-  --border:        #2f2f2b;
-  --border-strong: #45443f;
 
-  --text-primary:   #ffffff;
-  --text-secondary: #c3c2b7;
-  --text-muted:     #8a897e;
+  /* --- the room --- */
+  --espresso:  #12100e;
+  --espresso-2:#1a1512;
+  --surface-1: #241d18;   /* the flat colour the chart palette is validated against */
+  --surface-2: #2d241d;
 
-  --series-1: #3987e5;   /* blue   */
-  --series-2: #d95926;   /* orange */
-  --series-3: #199e70;   /* aqua   */
-  --context:  #4a4a45;   /* de-emphasis gray for "rest are context" */
+  /* --- glass --- */
+  --glass:      rgba(43, 34, 28, .58);
+  --glass-high: rgba(58, 46, 37, .66);
+  --glass-low:  rgba(33, 26, 21, .5);
+  --blur: saturate(1.15) blur(20px);
+  --border:        rgba(255, 235, 212, .085);
+  --border-strong: rgba(255, 235, 212, .17);
+  --sheen: linear-gradient(160deg, rgba(255,240,220,.055), rgba(255,240,220,0) 42%);
 
-  --good:     #0ca30c;
-  --warning:  #fab219;
-  --serious:  #ec835a;
-  --critical: #d03b3b;
+  /* --- ink --- */
+  --text-primary:   #f4eadd;
+  --text-secondary: #c5b5a3;
+  --text-muted:     #948577;
 
-  --r: 10px;
-  --pad: clamp(16px, 3vw, 32px);
-  --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+  /* --- data --- */
+  --series-1: #c47131;   /* roast    */
+  --series-2: #3890d2;   /* porcelain */
+  --context:  #5b4f47;   /* de-emphasis: "the rest is context" */
+  --crema:    #e8c9a0;
+
+  /* --- status (reserved) --- */
+  --good:     #6f9e4f;
+  --warning:  #c8952c;
+  --serious:  #c4703b;
+  --critical: #c0503f;
+
+  /* --- ui accent (not a data colour) --- */
+  --accent:      #d99a53;
+  --accent-dim:  rgba(217, 154, 83, .16);
+
+  --r:    16px;
+  --r-sm: 10px;
+  --rail: 244px;
+  --rail-collapsed: 74px;
+  --font: "Inter Tight", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --display: "Fraunces", "Iowan Old Style", Georgia, serif;
+  --shadow: 0 24px 60px -24px rgba(0,0,0,.75);
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; }
+html, body { margin: 0; padding: 0; height: 100%; }
 body {
-  background: var(--bg);
+  background: var(--espresso);
   color: var(--text-primary);
   font-family: var(--font);
   font-size: 15px;
-  line-height: 1.55;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  overflow: hidden;                 /* the app fits the screen; panes scroll, the page does not */
+  height: 100dvh;
+  display: grid;
+  grid-template-columns: auto 1fr;
 }
-.num { font-variant-numeric: tabular-nums; }
 
-/* ---------- shell ---------- */
-.wrap { max-width: 1120px; margin: 0 auto; padding: 0 var(--pad) 96px; }
+/* The light in the room: two warm pools the glass has something to refract. */
+body::before {
+  content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background:
+    radial-gradient(1100px 620px at 12% -8%,  rgba(196, 113, 49, .17), transparent 62%),
+    radial-gradient(900px 700px at 96% 108%, rgba(56, 144, 210, .10), transparent 60%),
+    linear-gradient(180deg, var(--espresso-2), var(--espresso) 55%);
+}
+/* Ground coffee, basically. Keeps the glass from looking like plastic. */
+body::after {
+  content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none; opacity: .32;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.82' numOctaves='3'/><feColorMatrix type='saturate' values='0'/></filter><rect width='160' height='160' filter='url(%23n)' opacity='.5'/></svg>");
+  mix-blend-mode: overlay;
+}
 
-header.top {
-  display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
-  padding: 34px 0 22px;
-}
-.mark {
-  font-size: 27px; font-weight: 620; letter-spacing: -0.035em;
-  display: flex; align-items: baseline; gap: 9px;
-}
-.mark .dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: var(--series-1); display: inline-block; transform: translateY(-2px);
-}
-.tag { color: var(--text-muted); font-size: 14px; letter-spacing: -0.01em; }
+.num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+.serif { font-family: var(--display); font-optical-sizing: auto; }
 
-nav.tabs {
-  display: flex; gap: 2px; border-bottom: 1px solid var(--border);
-  margin-bottom: 30px; overflow-x: auto;
+/* ============================ the rail ============================ */
+.rail {
+  position: relative; z-index: 3;
+  width: var(--rail); flex: none;
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 20px 14px 14px;
+  background: var(--glass-low);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  border-right: 1px solid var(--border);
+  transition: width .26s cubic-bezier(.22,.61,.36,1);
+  overflow: hidden;
 }
-nav.tabs button {
-  appearance: none; background: none; border: 0; border-bottom: 2px solid transparent;
-  color: var(--text-muted); font: inherit; font-size: 14px; font-weight: 500;
-  padding: 11px 15px; cursor: pointer; white-space: nowrap;
-  margin-bottom: -1px; transition: color .15s, border-color .15s;
+.rail.collapsed { width: var(--rail-collapsed); }
+
+.brand { display: flex; align-items: center; gap: 11px; padding: 4px 8px 20px; }
+.brand .cupmark { flex: none; width: 26px; height: 26px; }
+.brand .nm { font-family: var(--display); font-size: 21px; font-weight: 600; letter-spacing: -.01em; white-space: nowrap; }
+.rail.collapsed .brand { padding-left: 12px; }
+
+.navgroup { margin-top: 14px; }
+.navgroup > .lbl {
+  font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--text-muted); padding: 0 10px 7px; white-space: nowrap;
 }
-nav.tabs button:hover { color: var(--text-secondary); }
-nav.tabs button[aria-selected="true"] { color: var(--text-primary); border-bottom-color: var(--series-1); }
+.rail.collapsed .navgroup > .lbl { opacity: 0; height: 8px; padding: 0; }
 
-section.screen { display: none; }
-section.screen.active { display: block; animation: rise .32s cubic-bezier(.22,.61,.36,1); }
-@keyframes rise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+.navbtn {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  appearance: none; background: none; border: 0; border-radius: 11px;
+  color: var(--text-secondary); font: inherit; font-size: 14px; font-weight: 450;
+  padding: 9px 10px; cursor: pointer; text-align: left; white-space: nowrap;
+  transition: background .15s, color .15s;
+}
+.navbtn svg { flex: none; width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; opacity: .9; }
+.navbtn:hover { background: rgba(255,238,216,.05); color: var(--text-primary); }
+.navbtn[aria-current="true"] { background: var(--accent-dim); color: var(--crema); }
+.navbtn[aria-current="true"] svg { opacity: 1; }
+.navbtn .txt { overflow: hidden; text-overflow: ellipsis; }
+.rail.collapsed .navbtn .txt { opacity: 0; }
+.navbtn .dotwarn { margin-left: auto; width: 6px; height: 6px; border-radius: 50%; background: var(--critical); flex: none; }
+.rail.collapsed .navbtn .dotwarn { display: none; }
 
-/* ---------- cards ---------- */
+.railfoot { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border); }
+.railfoot .navbtn { font-size: 13px; color: var(--text-muted); }
+
+/* ============================ the stage ============================ */
+.stage {
+  position: relative; z-index: 2;
+  min-width: 0; min-height: 0;
+  display: flex; flex-direction: column;
+}
+
+.topbar {
+  flex: none; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 16px clamp(16px, 2.4vw, 30px) 14px;
+  border-bottom: 1px solid var(--border);
+}
+.topbar h1 { font-family: var(--display); font-size: clamp(19px, 2.1vw, 25px); font-weight: 600;
+             letter-spacing: -.015em; margin: 0; line-height: 1.15; }
+.topbar .sub { color: var(--text-muted); font-size: 13px; margin-top: 2px; max-width: 68ch; }
+.topbar .right { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: var(--glass); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  border: 1px solid var(--border); border-radius: 999px;
+  padding: 6px 13px; font-size: 12.5px; color: var(--text-secondary); white-space: nowrap;
+}
+.chip b { color: var(--text-primary); font-weight: 600; }
+.chip .d { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+button.chip { cursor: pointer; font-family: inherit; }
+button.chip:hover { border-color: var(--border-strong); color: var(--text-primary); }
+button.chip[aria-pressed="true"] { background: var(--accent-dim); border-color: rgba(217,154,83,.4); color: var(--crema); }
+
+.scroller { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: clamp(14px, 2vw, 24px) clamp(16px, 2.4vw, 30px) 28px; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.scroller::-webkit-scrollbar { width: 10px; }
+.scroller::-webkit-scrollbar-thumb { background: rgba(255,235,212,.12); border-radius: 20px; border: 3px solid transparent; background-clip: content-box; }
+
+section.screen { display: none; height: 100%; }
+section.screen.active { display: block; animation: rise .3s cubic-bezier(.22,.61,.36,1); }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { section.screen.active { animation: none; } }
+
+/* full-height section layouts — the app fills the window instead of trailing off it */
+.fill { display: grid; gap: 16px; height: 100%; min-height: 480px; }
+.fill.split      { grid-template-columns: minmax(0,1.05fr) minmax(0,.95fr); }
+.fill.split-wide { grid-template-columns: minmax(0,1.45fr) minmax(0,.85fr); }
+.fill.rows-hero  { grid-template-rows: auto minmax(240px,1fr); }
+.col { display: grid; gap: 16px; min-height: 0; grid-auto-rows: min-content; }
+/* a column where the last card takes whatever height is left, and scrolls inside */
+.col.fillrows { display: flex; flex-direction: column; gap: 16px; min-height: 0; }
+.col.fillrows > .card { flex: none; }
+.col.fillrows > .card:last-child { flex: 1 1 auto; min-height: 0; }
+@media (max-width: 1080px) { .fill.split, .fill.split-wide { grid-template-columns: 1fr; height: auto; } }
+
+/* ============================ glass card ============================ */
 .card {
-  background: var(--surface-1); border: 1px solid var(--border);
-  border-radius: var(--r); padding: var(--pad);
+  position: relative; min-width: 0; min-height: 0;
+  background: var(--glass); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  border: 1px solid var(--border); border-radius: var(--r);
+  padding: clamp(14px, 1.7vw, 22px);
+  box-shadow: var(--shadow);
+  display: flex; flex-direction: column; gap: 4px;
 }
-.card + .card { margin-top: 18px; }
-.grid { display: grid; gap: 18px; }
-@media (min-width: 860px) { .grid.two { grid-template-columns: 1.35fr 1fr; } }
+.card::before { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--sheen); pointer-events: none; }
+.card > * { position: relative; }
+.card.tight { padding: 14px 16px; }
+.card.flat { box-shadow: none; background: var(--glass-low); }
 
-h2.title { font-size: 17px; font-weight: 600; letter-spacing: -0.015em; margin: 0 0 3px; }
-p.sub { color: var(--text-muted); font-size: 13.5px; margin: 0 0 20px; max-width: 62ch; }
-p.note { color: var(--text-muted); font-size: 12.5px; margin: 14px 0 0; max-width: 68ch; }
+h2.title { font-family: var(--display); font-size: 17px; font-weight: 600; letter-spacing: -.01em; margin: 0; }
+p.sub { color: var(--text-muted); font-size: 13px; margin: 5px 0 0; max-width: 66ch; }
+p.note { color: var(--text-muted); font-size: 12.5px; margin: 12px 0 0; max-width: 72ch; }
+.grow { flex: 1; min-height: 0; }
 
-/* ---------- hero figure ---------- */
-.hero { display: flex; align-items: flex-end; gap: 20px; flex-wrap: wrap; }
-.hero .fig {
-  font-size: clamp(66px, 12vw, 104px); font-weight: 640;
-  letter-spacing: -0.05em; line-height: .84;
+/* ============================ the scale readout ============================
+   Numbers are shown as a RANGE by default. The band is the model's own
+   measured error at that horizon, read off the calibration artifact — not a
+   decoration. Flip "exact figures" in the top bar for the raw output. */
+.readout .words { font-family: var(--display); font-size: clamp(26px, 3.3vw, 44px); font-weight: 600;
+                  letter-spacing: -.025em; line-height: 1.02; }
+.readout .rangeline { color: var(--text-secondary); font-size: 13.5px; margin-top: 7px; }
+.readout .rangeline b { color: var(--text-primary); font-weight: 600; }
+
+.scale { margin-top: 14px; }
+.scale .track { position: relative; height: 12px; border-radius: 999px; background: rgba(255,235,212,.07);
+                border: 1px solid var(--border); overflow: hidden; }
+.scale .band { position: absolute; top: 0; bottom: 0; background: var(--series-1); opacity: .85; border-radius: 999px; }
+.scale .tgt  { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--crema); opacity: .85; }
+.scale .ticks { display: flex; justify-content: space-between; margin-top: 6px; color: var(--text-muted); font-size: 11px; }
+
+.pips { display: inline-flex; gap: 3px; vertical-align: middle; }
+.pips i { width: 15px; height: 6px; border-radius: 2px; background: rgba(255,235,212,.14); display: block; }
+
+/* ============================ bits ============================ */
+.statrow { display: grid; grid-template-columns: repeat(auto-fit, minmax(126px,1fr)); gap: 10px; }
+.stat { background: var(--glass-low); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 11px 13px; min-width: 0; }
+.stat .k { color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em; font-weight: 600; }
+.stat .v { font-size: 20px; font-weight: 600; letter-spacing: -.02em; margin-top: 3px; overflow-wrap: anywhere; }
+.stat .v small { font-size: 12px; font-weight: 500; color: var(--text-muted); letter-spacing: 0; }
+.stat .s { color: var(--text-muted); font-size: 11.5px; margin-top: 2px; }
+
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.field label { color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em; font-weight: 600; }
+.field input, .field select, textarea {
+  background: rgba(18,14,11,.55); border: 1px solid var(--border-strong); color: var(--text-primary);
+  border-radius: 9px; padding: 9px 11px; font: inherit; font-size: 13.5px; width: 100%;
 }
-.hero .cap { color: var(--text-secondary); font-size: 14.5px; padding-bottom: 8px; max-width: 30ch; }
-
-/* ---------- stat row ---------- */
-.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px,1fr)); gap: 1px;
-         background: var(--border); border: 1px solid var(--border); border-radius: var(--r);
-         overflow: hidden; margin-top: 22px; }
-.stat { background: var(--surface-1); padding: 15px 17px; }
-.stat .k { color: var(--text-muted); font-size: 11.5px; text-transform: uppercase;
-           letter-spacing: .07em; font-weight: 600; }
-.stat .v { font-size: 25px; font-weight: 600; letter-spacing: -0.03em; margin-top: 4px; }
-.stat .v small { font-size: 14px; font-weight: 500; color: var(--text-muted); letter-spacing: 0; }
-
-/* ---------- controls ---------- */
-.controls { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 22px; }
-.field { display: flex; flex-direction: column; gap: 6px; }
-.field label { color: var(--text-muted); font-size: 11.5px; text-transform: uppercase;
-               letter-spacing: .07em; font-weight: 600; }
-.field input, .field select {
-  background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text-primary);
-  border-radius: 7px; padding: 8px 11px; font: inherit; font-size: 14px; min-width: 120px;
-}
-.field input:focus, .field select:focus { outline: 2px solid var(--series-1); outline-offset: 1px; }
+.field input:focus, .field select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+.controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px,1fr)); gap: 12px; align-items: end; }
 
 button.action {
-  background: var(--series-1); color: #fff; border: 0; border-radius: 7px;
-  padding: 9px 18px; font: inherit; font-size: 14px; font-weight: 560; cursor: pointer;
+  background: linear-gradient(180deg, #dda45e, var(--accent)); color: #23180c; border: 0; border-radius: 10px;
+  padding: 10px 18px; font: inherit; font-size: 13.5px; font-weight: 620; cursor: pointer; white-space: nowrap;
 }
-button.action:hover { filter: brightness(1.08); }
-button.action.ghost { background: transparent; border: 1px solid var(--border-strong); color: var(--text-secondary); }
+button.action:hover { filter: brightness(1.06); }
+button.action:disabled { opacity: .55; cursor: default; }
+button.action.ghost { background: transparent; border: 1px solid var(--border-strong); color: var(--text-secondary); font-weight: 500; }
+button.action.ghost:hover { color: var(--text-primary); border-color: var(--crema); }
 
-/* ---------- self test ---------- */
-.course { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 14px;
-          padding: 13px 0; border-bottom: 1px solid var(--border); }
+.verdict { border-left: 2px solid var(--critical); padding: 4px 0 4px 15px; }
+.verdict .big { font-family: var(--display); font-size: 19px; font-weight: 600; letter-spacing: -.015em; }
+.verdict .small { color: var(--text-secondary); font-size: 13px; margin-top: 4px; }
+.verdict.ok { border-left-color: var(--good); }
+
+.todo { border-bottom: 1px solid var(--border); padding: 12px 0; display: flex; gap: 12px; }
+.todo:last-child { border-bottom: 0; padding-bottom: 0; }
+.todo .badge { flex: 0 0 25px; height: 25px; border-radius: 50%; display: grid; place-items: center;
+               font-size: 12px; font-weight: 700; background: rgba(255,235,212,.07);
+               border: 1px solid var(--border-strong); color: var(--text-secondary); }
+.todo.hot .badge { background: var(--critical); border-color: var(--critical); color: #fff; }
+.todo .tt { font-weight: 560; font-size: 14px; }
+.todo .td { color: var(--text-secondary); font-size: 12.5px; margin-top: 2px; line-height: 1.5; }
+
+.subjstrip { display: grid; overflow: auto; min-height: 0; padding-right: 4px; gap: 9px; grid-template-columns: repeat(auto-fill, minmax(184px,1fr)); }
+.subj { background: var(--glass-low); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 12px; cursor: default; }
+.subj .nm { font-size: 13px; font-weight: 560; margin-bottom: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.subj .wd { font-family: var(--display); font-size: 16px; font-weight: 600; letter-spacing: -.01em; }
+.subj .st { font-size: 11.5px; color: var(--text-muted); margin-top: 3px; }
+
+.course { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px;
+          padding: 10px 0; border-bottom: 1px solid var(--border); }
 .course:last-child { border-bottom: 0; }
-.course .name { font-weight: 520; font-size: 14.5px; }
-.course .meta { color: var(--text-muted); font-size: 12.5px; }
-.grades { display: flex; gap: 5px; }
-.grades button {
-  background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text-secondary);
-  border-radius: 6px; padding: 6px 11px; font: inherit; font-size: 12.5px; cursor: pointer;
-  transition: all .12s;
-}
-.grades button[aria-pressed="true"] { background: var(--series-1); border-color: var(--series-1); color: #fff; }
+.course .name { font-weight: 520; font-size: 13.5px; }
+.course .meta { color: var(--text-muted); font-size: 12px; }
+.grades { display: flex; gap: 4px; }
+.grades button { background: rgba(255,235,212,.05); border: 1px solid var(--border-strong); color: var(--text-secondary);
+                 border-radius: 8px; padding: 5px 10px; font: inherit; font-size: 12px; cursor: pointer; transition: all .12s; }
+.grades button:hover { color: var(--text-primary); }
+.grades button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #23180c; font-weight: 620; }
 
-/* ---------- table ---------- */
-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-th, td { text-align: right; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: right; padding: 9px 11px; border-bottom: 1px solid var(--border); }
 th:first-child, td:first-child { text-align: left; }
-th { color: var(--text-secondary); font-size: 12.5px; font-weight: 600; line-height: 1.35;
-     vertical-align: bottom; }
-.tech { color: var(--text-muted); font-size: 10.5px; font-weight: 500; text-transform: uppercase;
-        letter-spacing: .05em; }
-tr.ours td { background: rgba(57,135,229,.09); }
+th { color: var(--text-secondary); font-size: 12px; font-weight: 600; line-height: 1.35; vertical-align: bottom; }
+.tech { color: var(--text-muted); font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: .05em; }
+tr.ours td { background: rgba(196,113,49,.11); }
 tr.ours td:first-child { font-weight: 600; box-shadow: inset 2px 0 0 var(--series-1); }
 tbody tr:last-child td { border-bottom: 0; }
 .scroll { overflow-x: auto; }
 
-/* ---------- chart chrome ---------- */
-figure { margin: 0; }
-figcaption { color: var(--text-muted); font-size: 12.5px; margin-top: 12px; }
-svg { display: block; width: 100%; height: auto; overflow: visible; }
-.legend { display: flex; gap: 16px; flex-wrap: wrap; margin: 0 0 14px; padding: 0; list-style: none;
-          font-size: 12.5px; color: var(--text-secondary); }
-.legend li { display: flex; align-items: center; gap: 7px; }
-.legend .swatch { width: 11px; height: 3px; border-radius: 2px; }
+figure { margin: 0; display: flex; flex-direction: column; min-height: 0; flex: 1; }
+figcaption { color: var(--text-muted); font-size: 12px; margin-top: 10px; }
+.plot { flex: 1; min-height: 150px; position: relative; }
+.plot svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.plot.short { min-height: 110px; }
+
+.legend { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; padding: 0; list-style: none; font-size: 12px; }
+.legend li { display: flex; align-items: center; gap: 7px; color: var(--text-secondary);
+             border: 1px solid transparent; border-radius: 999px; padding: 3px 9px 3px 7px; }
+.legend li.pick { cursor: pointer; background: rgba(255,235,212,.045); border-color: var(--border); }
+.legend li.pick:hover { border-color: var(--border-strong); color: var(--text-primary); }
+.legend li.off { opacity: .4; }
+.legend .swatch { width: 12px; height: 3px; border-radius: 2px; flex: none; }
 
 .tip {
-  position: fixed; pointer-events: none; opacity: 0; transition: opacity .1s;
-  background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 7px;
-  padding: 8px 11px; font-size: 12.5px; z-index: 40; box-shadow: 0 6px 24px rgba(0,0,0,.5);
-  max-width: 230px;
+  position: fixed; pointer-events: none; opacity: 0; transition: opacity .1s; z-index: 60;
+  background: rgba(29,23,19,.93); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--border-strong); border-radius: 10px;
+  padding: 9px 12px; font-size: 12.5px; box-shadow: 0 12px 34px rgba(0,0,0,.6); max-width: 250px;
 }
-.tip .th { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
-.tip .tv { font-weight: 600; font-size: 14px; }
+.tip .th { color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; }
+.tip .tv { font-weight: 620; font-size: 15px; margin-top: 1px; }
+.tip .tr { display: flex; align-items: center; gap: 7px; margin-top: 5px; color: var(--text-secondary); }
+.tip .tr .k { width: 11px; height: 2.5px; border-radius: 2px; flex: none; }
+.tip .tr b { margin-left: auto; color: var(--text-primary); font-weight: 600; }
 
-.verdict { border-left: 2px solid var(--critical); padding: 3px 0 3px 15px; margin-top: 22px; }
-.verdict .big { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
-.verdict .small { color: var(--text-secondary); font-size: 13.5px; margin-top: 3px; }
-.verdict.ok { border-left-color: var(--good); }
+.readpanel { display: flex; gap: 16px; flex-wrap: wrap; align-items: baseline;
+             border-top: 1px solid var(--border); margin-top: 10px; padding-top: 10px; font-size: 12.5px; color: var(--text-muted); }
+.readpanel .rv { font-size: 15px; font-weight: 620; color: var(--text-primary); }
 
-.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 560;
-        padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border-strong);
-        color: var(--text-secondary); }
-.pill .d { width: 6px; height: 6px; border-radius: 50%; }
-
-.loading { color: var(--text-muted); font-size: 13.5px; padding: 40px 0; text-align: center; }
-
-/* ---------- dashboard ---------- */
-.bigrow { display: grid; gap: 18px; grid-template-columns: 1fr; }
-@media (min-width: 780px) { .bigrow { grid-template-columns: repeat(3, 1fr); } }
-.bigcard { background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--r);
-           padding: var(--pad); display: flex; flex-direction: column; justify-content: space-between; }
-.bigcard .k { color: var(--text-muted); font-size: 11.5px; text-transform: uppercase;
-              letter-spacing: .07em; font-weight: 600; }
-.bigcard .v { font-size: clamp(44px, 7vw, 62px); font-weight: 640; letter-spacing: -0.045em;
-              line-height: 1; margin: 12px 0 8px; }
-.bigcard .s { color: var(--text-secondary); font-size: 13.5px; line-height: 1.5; }
-.bigcard.alarm { border-color: rgba(208,59,59,.5); }
-.bigcard.alarm .v { color: var(--critical); }
-.bigcard.fine .v { color: var(--good); }
-
-.subjects { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(215px,1fr)); }
-.subj { background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px; padding: 15px; }
-.subj .nm { font-size: 14px; font-weight: 560; margin-bottom: 3px; }
-.subj .pc { font-size: 30px; font-weight: 640; letter-spacing: -.035em; line-height: 1.05; }
-.subj .st { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
-.subj .spark { margin-top: 10px; }
-
-.todo { border-bottom: 1px solid var(--border); padding: 15px 0; display: flex; gap: 13px; }
-.todo:last-child { border-bottom: 0; padding-bottom: 0; }
-.todo .badge { flex: 0 0 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
-               font-size: 12.5px; font-weight: 700; background: var(--surface-2);
-               border: 1px solid var(--border-strong); color: var(--text-secondary); }
-.todo.hot .badge { background: var(--critical); border-color: var(--critical); color: #fff; }
-.todo .tt { font-weight: 560; font-size: 14.5px; }
-.todo .td { color: var(--text-secondary); font-size: 13px; margin-top: 2px; line-height: 1.5; }
-
-/* ---------- explainer ---------- */
-.steps { display: flex; flex-direction: column; gap: 34px; margin-top: 8px; }
-.step { display: grid; grid-template-columns: 42px 1fr; gap: 18px; align-items: start; }
-.step .n { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
-           background: var(--series-1); color: #fff; font-weight: 700; font-size: 15px; }
-.step h3 { font-size: 18px; font-weight: 600; letter-spacing: -.015em; margin: 4px 0 8px; }
-.step p { color: var(--text-secondary); font-size: 14.5px; line-height: 1.65; margin: 0 0 10px; max-width: 74ch; }
-.three { display: grid; gap: 1px; background: var(--border); border: 1px solid var(--border);
-         border-radius: var(--r); overflow: hidden; margin-top: 14px; }
-@media (min-width: 760px) { .three { grid-template-columns: repeat(3,1fr); } }
-.tcell { background: var(--surface-1); padding: 17px; }
-.tcell .k { font-weight: 600; font-size: 14.5px; margin-bottom: 6px; }
-.tcell p { font-size: 13.5px; margin: 0; }
-
-/* ---------- scrubbers ---------- */
-.scrub { margin: 22px 0 4px; }
-.scrub label { display: block; color: var(--text-muted); font-size: 11.5px; text-transform: uppercase;
-               letter-spacing: .07em; font-weight: 600; margin-bottom: 9px; }
-.scrub input[type=range] { width: 100%; appearance: none; height: 3px; border-radius: 2px;
-  background: var(--border-strong); outline: none; }
-.scrub input[type=range]::-webkit-slider-thumb { appearance: none; width: 18px; height: 18px;
-  border-radius: 50%; background: var(--series-1); cursor: grab; border: 3px solid var(--surface-1);
-  box-shadow: 0 0 0 1px var(--series-1); }
-.scrub input[type=range]:active::-webkit-slider-thumb { cursor: grabbing; transform: scale(1.12); }
-.scrubout { display: flex; justify-content: space-between; margin-top: 9px;
-            font-size: 13px; color: var(--text-secondary); }
+.scrub { margin-top: 14px; }
+.scrub label { display: block; color: var(--text-muted); font-size: 10.5px; text-transform: uppercase;
+               letter-spacing: .09em; font-weight: 600; margin-bottom: 8px; }
+input[type=range] { width: 100%; appearance: none; height: 4px; border-radius: 3px; background: rgba(255,235,212,.14); outline: none; }
+input[type=range]::-webkit-slider-thumb { appearance: none; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--crema); cursor: grab; border: 4px solid #241d18; box-shadow: 0 0 0 1px var(--crema); }
+input[type=range]:active::-webkit-slider-thumb { cursor: grabbing; }
+input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border: 3px solid #241d18; border-radius: 50%; background: var(--crema); }
+.scrubout { display: flex; justify-content: space-between; gap: 12px; margin-top: 8px; font-size: 13px; color: var(--text-secondary); }
 .scrubout span:last-child { font-weight: 620; color: var(--text-primary); }
 
-.tradegrid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border);
-             border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; margin-top: 22px; }
-.tradecell { background: var(--surface-1); padding: 17px; }
-.tradecell .k { color: var(--text-muted); font-size: 11.5px; text-transform: uppercase;
-                letter-spacing: .07em; font-weight: 600; }
-.tradecell .v { font-size: 38px; font-weight: 630; letter-spacing: -0.04em; margin-top: 5px; line-height: 1; }
-.tradecell .s { color: var(--text-muted); font-size: 12.5px; margin-top: 5px; }
+/* ============================ the cup ============================ */
+.cupwrap { display: grid; grid-template-columns: minmax(0,auto) minmax(0,1fr); gap: clamp(14px,2vw,26px); align-items: center; flex: 1; min-height: 0; }
+@media (max-width: 720px) { .cupwrap { grid-template-columns: 1fr; } }
+.cupstage { position: relative; display: grid; place-items: center; min-height: 0; height: 100%; }
+.cupstage svg { width: 100%; height: 100%; max-height: 340px; }
+.cupside { min-width: 0; }
 
-/* Curves draw themselves in. Motion is off for anyone who asked for it to be. */
-@media (prefers-reduced-motion: no-preference) {
-  path.draw { stroke-dasharray: var(--len); stroke-dashoffset: var(--len);
-              animation: draw .85s cubic-bezier(.22,.61,.36,1) forwards; }
+/* ============================ focus timer ============================ */
+.focuswrap { display: grid; place-items: center; height: 100%; flex: 1; min-height: 0; }
+.timerdial { position: relative; width: min(46vh, 320px); aspect-ratio: 1; display: grid; place-items: center; }
+/* the ring gets its own layer: the chart engine clears whatever host it draws
+   into, and the clock text lives in the middle of this one */
+.dialring { position: absolute; inset: 0; }
+.timerdial svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.timerdial .readoutbox { text-align: center; z-index: 1; }
+.timerdial .clock { font-family: var(--display); font-size: clamp(38px, 6vw, 60px); font-weight: 600; letter-spacing: -.03em; line-height: 1; }
+.timerdial .state { color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .12em; margin-top: 8px; }
+.presets { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.presets button { background: rgba(255,235,212,.05); border: 1px solid var(--border); color: var(--text-secondary);
+                  border-radius: 999px; padding: 6px 14px; font: inherit; font-size: 12.5px; cursor: pointer; }
+.presets button[aria-pressed="true"] { background: var(--accent-dim); border-color: rgba(217,154,83,.42); color: var(--crema); }
+
+.steps { display: flex; flex-direction: column; gap: 26px; }
+.step { display: grid; grid-template-columns: 36px 1fr; gap: 16px; align-items: start; }
+.step .n { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
+           background: var(--accent-dim); border: 1px solid rgba(217,154,83,.35); color: var(--crema); font-weight: 700; font-size: 14px; }
+.step h3 { font-family: var(--display); font-size: 17px; font-weight: 600; margin: 3px 0 7px; }
+.step p { color: var(--text-secondary); font-size: 13.5px; line-height: 1.65; margin: 0 0 8px; max-width: 74ch; }
+.three { display: grid; gap: 10px; margin-top: 12px; }
+@media (min-width: 760px) { .three { grid-template-columns: repeat(3,1fr); } }
+.tcell { background: var(--glass-low); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 14px; }
+.tcell .k { font-weight: 620; font-size: 13.5px; margin-bottom: 5px; }
+.tcell p { font-size: 12.5px; margin: 0; color: var(--text-secondary); }
+
+.tradegrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+.tradecell { background: var(--glass-low); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 14px; }
+.tradecell .k { color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em; font-weight: 600; }
+.tradecell .v { font-family: var(--display); font-size: 30px; font-weight: 600; letter-spacing: -.03em; margin-top: 4px; line-height: 1; }
+.tradecell .s { color: var(--text-muted); font-size: 12px; margin-top: 4px; }
+
+.ingest-note { color: var(--text-secondary); font-size: 12.5px; line-height: 1.5; }
+.ingest-note strong { color: var(--text-primary); font-weight: 600; }
+.ingest-note.bad { color: var(--warning); }
+textarea { resize: vertical; font: 400 12.5px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.loading { color: var(--text-muted); font-size: 13px; display: grid; place-items: center; height: 100%; min-height: 120px; }
+.rowbtns { display: flex; gap: 9px; flex-wrap: wrap; align-items: center; }
+
+@media (max-width: 860px) {
+  body { grid-template-columns: 1fr; }
+  .rail { position: fixed; inset: 0 auto 0 0; z-index: 30; box-shadow: var(--shadow); }
+  .rail.collapsed { width: 0; padding-left: 0; padding-right: 0; border-right: 0; }
 }
-@keyframes draw { to { stroke-dashoffset: 0; } }
-
-    /* ---- syllabus intake ---- */
-    .ingest textarea {
-      width: 100%; box-sizing: border-box; resize: vertical;
-      background: var(--surface-2); color: var(--text-primary);
-      border: 1px solid var(--border); border-radius: 8px;
-      padding: 12px 14px; font: 400 13px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace;
-    }
-    .ingest textarea:focus { outline: none; border-color: var(--series-1); }
-    .ingest-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
-    .ingest-note { color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
-    .ingest-note strong { color: var(--text-primary); font-weight: 600; }
-    .ingest-note.bad { color: var(--warning); }
-  </style>
+</style>
 </head>
 <body>
-<div class="wrap">
 
-  <header class="top">
-    <div class="mark"><span class="dot"></span>Cutoff</div>
-    <div class="tag">what you'll remember on exam morning — and the last day you can still fix it</div>
-  </header>
+<!-- ============================ rail ============================ -->
+<aside class="rail" id="rail">
+  <div class="brand">
+    <svg class="cupmark" viewBox="0 0 24 24" fill="none" stroke="#d99a53" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 9h13v6a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z"/><path d="M17 11h1.6a2.4 2.4 0 0 1 0 4.8H17"/>
+      <path d="M8 5.5c0-1 1-1.4 1-2.5M12 5.5c0-1 1-1.4 1-2.5"/>
+    </svg>
+    <div class="nm">Cutoff</div>
+  </div>
 
-  <nav class="tabs" role="tablist">
-    <button role="tab" data-screen="home" aria-selected="true">Dashboard</button>
-    <button role="tab" data-screen="syllabus" aria-selected="false">My subjects</button>
-    <button role="tab" data-screen="forecast" aria-selected="false">What I'll forget</button>
-    <button role="tab" data-screen="deadline" aria-selected="false">My cutoff</button>
-    <button role="tab" data-screen="twoexams" aria-selected="false">Two exams</button>
-    <button role="tab" data-screen="howitworks" aria-selected="false">How it works</button>
-    <button role="tab" data-screen="proof" aria-selected="false">Can I trust it?</button>
-  </nav>
+  <div class="navgroup">
+    <div class="lbl">Your semester</div>
+    <button class="navbtn" data-screen="home" title="Today">
+      <svg viewBox="0 0 24 24"><path d="M4 9h13v6a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z"/><path d="M17 11h1.6a2.4 2.4 0 0 1 0 4.8H17"/></svg>
+      <span class="txt">Today</span></button>
+    <button class="navbtn" data-screen="syllabus" title="My syllabus">
+      <svg viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5z"/><path d="M8 10h8M8 14h6"/></svg>
+      <span class="txt">My syllabus</span></button>
+  </div>
 
-  <!-- ================= DASHBOARD ================= -->
-  <section class="screen active" id="screen-home">
-    <div class="bigrow" id="bigRow"></div>
+  <div class="navgroup">
+    <div class="lbl">The forecast</div>
+    <button class="navbtn" data-screen="forecast" title="What I'll forget">
+      <svg viewBox="0 0 24 24"><path d="M4 6v13h16"/><path d="M4 9c5 0 6 8 16 8"/></svg>
+      <span class="txt">What I'll forget</span></button>
+    <button class="navbtn" data-screen="deadline" title="My cutoff">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="7"/><path d="M12 9.5V13l2.2 1.6M9 3h6"/></svg>
+      <span class="txt">My cutoff</span></button>
+    <button class="navbtn" data-screen="plan" title="The plan">
+      <svg viewBox="0 0 24 24"><path d="M5 5h14v15H5z"/><path d="M5 9h14M9 3v4M15 3v4M9 13h6M9 16.5h4"/></svg>
+      <span class="txt">The plan</span></button>
+    <button class="navbtn" data-screen="twoexams" title="Two exams">
+      <svg viewBox="0 0 24 24"><path d="M4 19V5M4 19h16"/><path d="M8 15a9 9 0 0 1 9-9"/><circle cx="8" cy="15" r="1.6"/><circle cx="17" cy="6" r="1.6"/></svg>
+      <span class="txt">Two exams</span></button>
+  </div>
 
-    <div class="grid two" style="margin-top:18px">
-      <div class="card">
-        <h2 class="title">How much you'll have left, day by day</h2>
-        <p class="sub">Right now you know almost everything you've studied. Every day that
-          passes without revising, a bit more slips. This is that slipping, drawn out to the
-          day of your exam.</p>
-        <ul class="legend" id="homeLegend"></ul>
-        <figure><div id="homeChart" class="loading">—</div></figure>
-      </div>
+  <div class="navgroup">
+    <div class="lbl">Tonight</div>
+    <button class="navbtn" data-screen="focus" title="Focus">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 8.5V13h3.5"/></svg>
+      <span class="txt">Focus</span><span id="focusDot" style="display:none" class="dotwarn"></span></button>
+  </div>
 
-      <div class="card">
-        <h2 class="title">What to do today</h2>
-        <p class="sub">The shortest useful answer we can give you.</p>
-        <div id="todo"></div>
-      </div>
+  <div class="navgroup">
+    <div class="lbl">The receipts</div>
+    <button class="navbtn" data-screen="howitworks" title="How it works">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.5a2.5 2.5 0 1 1 3.3 2.4c-.6.2-.9.7-.9 1.3v.4"/><path d="M12 17h.01"/></svg>
+      <span class="txt">How it works</span></button>
+    <button class="navbtn" data-screen="proof" title="Can I trust it?">
+      <svg viewBox="0 0 24 24"><path d="M12 3.5 19 6v6c0 4.2-2.9 7.4-7 8.5-4.1-1.1-7-4.3-7-8.5V6z"/><path d="M9 12.2l2.1 2.1L15.5 10"/></svg>
+      <span class="txt">Can I trust it?</span></button>
+  </div>
+
+  <div class="railfoot">
+    <button class="navbtn" id="railToggle" title="Hide the menu  ( [ )">
+      <svg viewBox="0 0 24 24" id="railToggleIcon"><path d="M4 5h16v14H4z"/><path d="M10 5v14"/></svg>
+      <span class="txt">Hide menu</span></button>
+  </div>
+</aside>
+
+<!-- ============================ stage ============================ -->
+<main class="stage">
+  <div class="topbar">
+    <div>
+      <h1 id="pageTitle">Today</h1>
+      <div class="sub" id="pageSub"></div>
     </div>
+    <div class="right">
+      <span class="chip" id="chipDays" title="Days until the exam you set">—</span>
+      <span class="chip" id="chipCutoff" title="The last day you can start and still reach your target">—</span>
+      <button class="chip" id="exactToggle" aria-pressed="false"
+        title="Numbers are shown as a range by default. The range is the model's own measured error at this horizon.">exact figures</button>
+    </div>
+  </div>
 
-    <div class="card" style="margin-top:18px">
-      <h2 class="title">Every subject, weakest first</h2>
-      <p class="sub">Each card shows how much of that subject you'd still have on exam day,
-        and how fast it's slipping. Red means it needs you soon.</p>
-      <div class="subjects" id="subjectCards"></div>
+  <div class="scroller" id="scroller">
+
+  <!-- ===================== TODAY ===================== -->
+  <section class="screen active" id="screen-home">
+    <div class="fill split">
+      <div class="card">
+        <h2 class="title">Your cup on exam morning</h2>
+        <p class="sub">How full the cup is = how much of your syllabus you'd still hold on the day,
+          if you did nothing between now and then. The ring is how much of your window is left.</p>
+        <div class="cupwrap">
+          <div class="cupstage"><div id="cupChart" class="loading">brewing…</div></div>
+          <div class="cupside readout">
+            <div class="words" id="cupWords">—</div>
+            <div class="rangeline" id="cupRange"></div>
+            <div class="scale" id="cupScale"></div>
+            <div class="statrow" style="margin-top:16px" id="cupStats"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col fillrows">
+        <div class="card tight" id="verdictCard"><div id="verdict"></div></div>
+        <div class="card">
+          <h2 class="title">What to do tonight</h2>
+          <div id="todo" style="margin-top:8px"></div>
+        </div>
+        <div class="card">
+          <h2 class="title">Every subject, weakest first</h2>
+          <p class="sub">Hover one to see the exact figure and the range around it.</p>
+          <div class="subjstrip" id="subjectCards" style="margin-top:12px"></div>
+        </div>
+      </div>
     </div>
   </section>
 
-  <!-- ================= 1. SYLLABUS ================= -->
+  <!-- ===================== SYLLABUS ===================== -->
   <section class="screen" id="screen-syllabus">
-    <div class="card">
-      <h2 class="title">Start with your actual syllabus</h2>
-      <p class="sub">Paste the syllabus your department handed you, or your own notes.
-        Cutoff splits it into subjects and into the individual facts you'd have to
-        recall in the exam — because "eight subjects" and
-        "eight subjects, four hundred separate things to recall" are very different
-        amounts of work, and only one of them can be scheduled.</p>
-
-      <div class="ingest">
-        <textarea id="syllabusText" rows="6" spellcheck="false"
+    <div class="fill split">
+      <div class="card">
+        <h2 class="title">Start with your actual syllabus</h2>
+        <p class="sub">Paste what your department handed you. Cutoff splits it into subjects and into
+          the individual facts you'd have to recall — because "eight subjects" and "eight subjects,
+          four hundred separate things to recall" are very different amounts of work, and only one
+          of them can be scheduled.</p>
+        <textarea id="syllabusText" rows="9" spellcheck="false" style="margin-top:14px"
           placeholder="CHE 201 — Chemical Engineering Thermodynamics&#10;Unit 1: Laws and state functions&#10;Zeroth law, first law, closed and open systems; internal energy, enthalpy&#10;&#10;CHE 202 — Fluid Mechanics&#10;Continuity, Navier–Stokes, Bernoulli, boundary layers"></textarea>
-        <div class="ingest-row">
+        <div class="rowbtns" style="margin-top:12px">
           <button id="readSyllabus" class="action">Read my syllabus →</button>
           <button id="sampleSyllabus" class="action ghost">Use a sample semester</button>
-          <span id="ingestNote" class="ingest-note"></span>
+        </div>
+        <p class="ingest-note" id="ingestNote" style="margin-top:12px"></p>
+
+        <div class="controls" style="margin-top:20px">
+          <div class="field"><label for="examdate">When is your exam?</label><input type="date" id="examdate"></div>
+          <div class="field"><label for="cap">Facts per sitting</label><input type="number" id="cap" value="40" min="5" max="300" step="5"></div>
+          <div class="field"><label for="density">Facts per syllabus line</label><input type="number" id="density" value="6" min="1" max="30" step="1"></div>
+          <div class="field"><label for="target">Target on the day</label>
+            <select id="target"><option value="0.95">95%</option><option value="0.90" selected>90%</option>
+              <option value="0.85">85%</option><option value="0.80">80%</option></select></div>
         </div>
       </div>
 
-      <p class="sub" style="margin-top:26px">Now tell it how well you know each one.
-        Tap a number: <strong>1</strong> if it's completely gone, <strong>4</strong> if
-        you could teach it. That's the whole setup — everything else on this site is
-        worked out from your syllabus, these taps, and today's date.</p>
-
-      <div class="controls">
-        <div class="field">
-          <label for="examdate">When is your exam?</label>
-          <input type="date" id="examdate">
+      <div class="card">
+        <h2 class="title">How well do you know each one?</h2>
+        <p class="sub">Tap a number. <strong>1</strong> if it's completely gone, <strong>4</strong> if you
+          could teach it. That's the whole setup — everything else is worked out from your syllabus,
+          these taps, and today's date.</p>
+        <div id="courses" class="grow" style="overflow:auto; margin-top:8px"></div>
+        <div class="rowbtns" style="margin-top:14px">
+          <button class="action" id="run">Forecast my exam →</button>
+          <button class="action ghost" id="addcourse">Add a subject</button>
         </div>
-        <div class="field">
-          <label for="cap">How many facts can you revise in one sitting?</label>
-          <input type="number" id="cap" value="40" min="5" max="300" step="5">
-        </div>
-        <div class="field">
-          <label for="density">How many facts is one syllabus line worth?</label>
-          <input type="number" id="density" value="6" min="1" max="30" step="1">
-        </div>
-        <div class="field">
-          <label for="target">How much do you want to know on the day?</label>
-          <select id="target">
-            <option value="0.95">95%</option>
-            <option value="0.90" selected>90%</option>
-            <option value="0.85">85%</option>
-            <option value="0.80">80%</option>
-          </select>
-        </div>
+        <p class="note"><strong>1</strong> gone · <strong>2</strong> shaky · <strong>3</strong> solid ·
+          <strong>4</strong> could teach it. Tracking <span id="percourse">600</span> separate facts —
+          every one forecast on its own, then added up.</p>
       </div>
-
-      <div id="courses"></div>
-
-      <div style="margin-top:22px; display:flex; gap:10px; flex-wrap:wrap;">
-        <button class="action" id="run">Forecast my exam →</button>
-        <button class="action ghost" id="addcourse">Add a subject</button>
-      </div>
-      <p class="note"><strong>1</strong> = gone · <strong>2</strong> = shaky ·
-        <strong>3</strong> = solid · <strong>4</strong> = I could teach it.
-        Cutoff is tracking <span id="percourse">600</span> separate facts across these
-        subjects — every one of them forecast on its own, then added up.</p>
     </div>
   </section>
 
-  <!-- ================= 2. FORECAST ================= -->
+  <!-- ===================== FORECAST ===================== -->
   <section class="screen" id="screen-forecast">
-    <div class="card">
-      <div class="hero">
-        <div class="fig num" id="heroPct">—</div>
-        <div class="cap" id="heroCap">Set your subjects up first and this fills in.</div>
+    <div class="fill rows-hero">
+      <div class="card tight">
+        <div style="display:flex; gap:22px; align-items:flex-end; flex-wrap:wrap">
+          <div class="readout" style="min-width:min(340px,100%)">
+            <div class="words" id="heroWords">—</div>
+            <div class="rangeline" id="heroRange">Set your subjects up first and this fills in.</div>
+          </div>
+          <div class="statrow grow" id="forecastStats" style="min-width:260px"></div>
+        </div>
       </div>
-      <div class="stats" id="forecastStats"></div>
-    </div>
-
-    <div class="grid two" style="margin-top:18px">
-      <div class="card">
-        <h2 class="title">Everything slipping away, subject by subject</h2>
-        <p class="sub">Each line is one subject. It starts high — you know it now — and falls as
-          the weeks pass. Your worst subject is in orange so you can find it instantly.
-          The red line on the right is exam day.</p>
-        <ul class="legend" id="decayLegend"></ul>
-        <figure><div id="decayChart" class="loading">—</div>
-          <figcaption id="decayCaption"></figcaption></figure>
-      </div>
-      <div class="card">
-        <h2 class="title">Which subjects will hurt most</h2>
-        <p class="sub">How much of each you'd still have on exam morning. The short bars at
-          the top are where an hour of revision is worth the most.</p>
-        <figure><div id="conceptChart" class="loading">—</div></figure>
+      <div class="fill split-wide" style="min-height:0">
+        <div class="card">
+          <h2 class="title">Everything slipping away, subject by subject</h2>
+          <p class="sub">Each line is one subject, starting where you are now and falling towards exam day.
+            Click a name in the legend to isolate it.</p>
+          <ul class="legend" id="decayLegend" style="margin-top:12px"></ul>
+          <figure><div id="decayChart" class="plot loading">—</div>
+            <div class="readpanel" id="decayRead"></div>
+            <figcaption id="decayCaption"></figcaption></figure>
+        </div>
+        <div class="card">
+          <h2 class="title">Which subjects will hurt most</h2>
+          <p class="sub">Bars are ranges, not points — the width is the model's measured error at this
+            horizon. The short ones are where an hour is worth the most.</p>
+          <figure><div id="conceptChart" class="plot loading" style="margin-top:12px">—</div></figure>
+        </div>
       </div>
     </div>
   </section>
 
-  <!-- ================= 3. DEADLINE ================= -->
+  <!-- ===================== CUTOFF ===================== -->
   <section class="screen" id="screen-deadline">
-    <div class="card">
-      <h2 class="title">The last day you can still start</h2>
-      <p class="sub">Here's the idea. Pick any day and imagine you start revising then and work
-        flat out every single night until the exam — as hard as you physically can. How much
-        would you know on the day? That's the blue line.<br><br>
-        Start early and you're fine. Start late and there simply aren't enough nights left,
-        no matter how hard you work. <strong>The day the blue line drops below your target
-        is your cutoff</strong> — and it lands well before the exam.</p>
-      <figure><div id="ceilingChart" class="loading">—</div>
-        <figcaption id="ceilingCaption"></figcaption></figure>
-
-      <div class="scrub">
-        <label for="startday">Drag this: what if I start on…</label>
-        <input type="range" id="startday" min="0" max="86" value="0">
-        <div class="scrubout"><span id="scrubDay">today</span><span id="scrubVal">—</span></div>
+    <div class="fill split-wide">
+      <div class="card">
+        <h2 class="title">The last day you can still start</h2>
+        <p class="sub">Pick any day and imagine you start then and work flat out every night until the
+          exam. How much would you know on the day? That's the line. Drag it.</p>
+        <figure><div id="ceilingChart" class="plot loading" style="margin-top:10px">—</div>
+          <figcaption id="ceilingCaption"></figcaption></figure>
+        <div class="scrub">
+          <label for="startday">Drag: what if I start on…</label>
+          <input type="range" id="startday" min="0" max="86" value="0">
+          <div class="scrubout"><span id="scrubDay">today</span><span id="scrubVal">—</span></div>
+        </div>
       </div>
-      <div id="verdict"></div>
-    </div>
-
-    <div class="card">
-      <h2 class="title">The least work that still gets you there</h2>
-      <p class="sub">Cutoff picks revision sessions one at a time, always choosing the one that
-        adds the most to your exam-day score per minute spent. It stops the moment you hit
-        your target — so this is close to the smallest amount of work that works.</p>
-      <div class="stats" id="planStats"></div>
-      <figure style="margin-top:20px"><div id="planChart" class="loading">—</div>
-        <figcaption id="planCaption"></figcaption></figure>
+      <div class="col fillrows">
+        <div class="card"><div id="verdict2"></div></div>
+        <div class="card">
+          <h2 class="title">Why a deadline exists at all</h2>
+          <p class="sub">Revision done close to the exam is worth more — that's why cramming works, and
+            we're not going to pretend otherwise. But you can't sit through six hundred facts the night
+            before. You get through maybe <span id="capEcho">40</span>. Once the nights are the scarce
+            thing, there's a last day you can start and still finish. Almost nobody knows theirs.</p>
+          <div class="statrow" id="ceilStats" style="margin-top:14px"></div>
+        </div>
+      </div>
     </div>
   </section>
 
-  <!-- ================= 4. TWO EXAMS ================= -->
-  <section class="screen" id="screen-twoexams">
-    <div class="card">
-      <h2 class="title">You don't have one exam. You have two.</h2>
-      <p class="sub">Mid-sems in September, end-sems in November — and only so many free
-        evenings in between. Every hour you give to one is an hour the other doesn't get.<br><br>
-        So there is no single "best" plan. There's a <strong>trade</strong>. Drag the slider
-        and watch the two scores move in opposite directions. Every dot on the chart is a real
-        revision plan; you're choosing which one you want to live in.</p>
-
-      <div class="controls">
-        <div class="field"><label for="exam1">Mid-sems, days from now</label>
-          <input type="number" id="exam1" value="20" min="2" max="200"></div>
-        <div class="field"><label for="exam2">End-sems, days from now</label>
-          <input type="number" id="exam2" value="87" min="3" max="365"></div>
-        <div class="field"><label for="budget">Total minutes you'll revise, all term</label>
-          <input type="number" id="budget" value="200" min="10" max="2000" step="10"></div>
-        <button class="action" id="runFrontier">Compute the frontier</button>
+  <!-- ===================== PLAN ===================== -->
+  <section class="screen" id="screen-plan">
+    <div class="fill rows-hero">
+      <div class="card tight"><div class="statrow" id="planStats"></div></div>
+      <div class="fill split-wide" style="min-height:0">
+        <div class="card">
+          <h2 class="title">The least work that still gets you there</h2>
+          <p class="sub">Cutoff picks sessions one at a time, always the one that adds most per minute
+            spent, and stops the moment you hit your target. Each bar is one evening — hover it.</p>
+          <figure><div id="planChart" class="plot loading" style="margin-top:10px">—</div>
+            <figcaption id="planCaption"></figcaption></figure>
+        </div>
+        <div class="col fillrows">
+          <div class="card">
+            <h2 class="title">Tonight</h2>
+            <div id="tonightBox" style="margin-top:8px"></div>
+            <div class="rowbtns" style="margin-top:14px">
+              <button class="action" id="brewFromPlan">Brew this session →</button>
+            </div>
+          </div>
+          <div class="card">
+            <h2 class="title">Where the effort lands</h2>
+            <p class="sub">Sessions per subject across the whole plan.</p>
+            <figure><div id="planMixChart" class="plot short loading" style="margin-top:10px">—</div></figure>
+          </div>
+        </div>
       </div>
+    </div>
+  </section>
 
-      <div class="grid two">
-        <figure><div id="frontierChart" class="loading">—</div>
+  <!-- ===================== TWO EXAMS ===================== -->
+  <section class="screen" id="screen-twoexams">
+    <div class="fill split">
+      <div class="card">
+        <h2 class="title">You don't have one exam. You have two.</h2>
+        <p class="sub">Mid-sems in September, end-sems in November, and only so many free evenings.
+          Every dot is a real revision plan using the same nights. There is no plan that wins both.</p>
+        <div class="controls" style="margin-top:14px">
+          <div class="field"><label for="exam1">Mid-sems, days away</label><input type="number" id="exam1" value="20" min="2" max="200"></div>
+          <div class="field"><label for="exam2">End-sems, days away</label><input type="number" id="exam2" value="87" min="3" max="365"></div>
+          <div class="field"><label for="budget">Total minutes, all term</label><input type="number" id="budget" value="200" min="10" max="2000" step="10"></div>
+          <button class="action" id="runFrontier">Compute the frontier</button>
+        </div>
+        <figure style="margin-top:14px"><div id="frontierChart" class="plot loading">—</div>
           <figcaption id="frontierCaption"></figcaption></figure>
-        <div>
-          <div class="scrub">
-            <label for="tradeoff">Drag this: which exam matters more to you?</label>
+      </div>
+      <div class="col fillrows">
+        <div class="card">
+          <h2 class="title">Pick your trade</h2>
+          <div class="scrub" style="margin-top:6px">
+            <label for="tradeoff">Which exam matters more to you?</label>
             <input type="range" id="tradeoff" min="0" max="100" value="50">
             <div class="scrubout"><span>end-sems</span><span>mid-sems</span></div>
           </div>
           <div class="tradegrid" id="tradeGrid"></div>
         </div>
+        <div class="card"><div id="frontierVerdict"></div></div>
       </div>
-      <div id="frontierVerdict"></div>
     </div>
   </section>
 
-  <!-- ================= HOW IT WORKS ================= -->
-  <section class="screen" id="screen-howitworks">
-    <div class="card">
-      <h2 class="title">How any of this actually works</h2>
-      <p class="sub">No maths required. Three ideas, and then everything else on this site
-        follows from them.</p>
-
-      <div class="steps">
-        <div class="step">
-          <div class="n">1</div>
-          <div>
-            <h3>Forgetting isn't random. It has a shape.</h3>
-            <p>Learn something today and you'll be shaky on it in a week, worse in a month.
-              That fade follows a curve that's been measured since the 1880s. Because it has a
-              shape, it can be predicted — that's the whole reason Cutoff can exist.</p>
-            <figure><div id="explainCurve" class="loading">—</div>
-              <figcaption>Two facts. The steep one you barely know; the flat one is stuck.</figcaption></figure>
-          </div>
-        </div>
-
-        <div class="step">
-          <div class="n">2</div>
-          <div>
-            <h3>Every fact you know carries three numbers.</h3>
-            <p>This is the model, in full. There's nothing else in it.</p>
-            <div class="three">
-              <div class="tcell"><div class="k">How hard it is</div>
-                <p>Some facts stick after one look. Others you re-learn five times. Cutoff
-                  tracks this per fact and it barely changes.</p></div>
-              <div class="tcell"><div class="k">How well it's stuck</div>
-                <p>How many days until you're down to a coin-flip on it. Revising
-                  successfully pushes this up. Forgetting knocks it back down.</p></div>
-              <div class="tcell"><div class="k">Your chance right now</div>
-                <p>Given how stuck it is and how long since you looked — what are the odds you
-                  could produce it this second? This is what falls every day you do nothing.</p></div>
+  <!-- ===================== FOCUS ===================== -->
+  <section class="screen" id="screen-focus">
+    <div class="fill split">
+      <div class="card">
+        <div class="focuswrap">
+          <div style="display:grid; gap:20px; justify-items:center">
+            <div class="timerdial" id="timerDial">
+              <div class="dialring" id="timerRing"></div>
+              <div class="readoutbox">
+                <div class="clock num" id="timerClock">25:00</div>
+                <div class="state" id="timerState">ready to brew</div>
+              </div>
             </div>
+            <div class="presets" id="presets">
+              <button data-min="15" aria-pressed="false">15 · short black</button>
+              <button data-min="25" aria-pressed="true">25 · one cup</button>
+              <button data-min="45" aria-pressed="false">45 · long pour</button>
+            </div>
+            <div class="rowbtns" style="justify-content:center">
+              <button class="action" id="timerStart">Start brewing</button>
+              <button class="action ghost" id="timerReset">Reset</button>
+            </div>
+            <p class="note" style="text-align:center; margin:0">Space starts and pauses it. It keeps
+              running in a background tab — the title bar counts down.</p>
           </div>
         </div>
+      </div>
+      <div class="col fillrows">
+        <div class="card">
+          <h2 class="title">Tonight's brew</h2>
+          <p class="sub">Straight off your plan: the first session it wants from you.</p>
+          <div id="focusTarget" style="margin-top:12px"></div>
+        </div>
+        <div class="card">
+          <h2 class="title">Cups today</h2>
+          <p class="sub">One cup per finished session. Kept in this browser only — nothing is sent anywhere.</p>
+          <div id="cupsToday" style="margin-top:14px"></div>
+          <div class="statrow" id="focusStats" style="margin-top:16px"></div>
+        </div>
+      </div>
+    </div>
+  </section>
 
-        <div class="step">
-          <div class="n">3</div>
-          <div>
+  <!-- ===================== HOW IT WORKS ===================== -->
+  <section class="screen" id="screen-howitworks">
+    <div class="fill split">
+      <div class="card">
+        <h2 class="title">How any of this actually works</h2>
+        <p class="sub">No maths required. Three ideas, and everything else follows from them.</p>
+        <div class="steps" style="margin-top:20px">
+          <div class="step"><div class="n">1</div><div>
+            <h3>Forgetting isn't random. It has a shape.</h3>
+            <p>Learn something today and you'll be shaky in a week, worse in a month. That fade follows
+              a curve that's been measured since the 1880s. Because it has a shape, it can be
+              predicted — that's the whole reason Cutoff can exist.</p>
+          </div></div>
+          <div class="step"><div class="n">2</div><div>
+            <h3>Every fact you know carries three numbers.</h3>
+            <p>This is the model in full. There is nothing else in it.</p>
+            <div class="three">
+              <div class="tcell"><div class="k">How hard it is</div><p>Some facts stick after one look.
+                Others you re-learn five times. Tracked per fact, and it barely changes.</p></div>
+              <div class="tcell"><div class="k">How well it's stuck</div><p>Days until you're down to a
+                coin flip on it. A successful review pushes it up; forgetting knocks it back.</p></div>
+              <div class="tcell"><div class="k">Your chance right now</div><p>Given how stuck it is and
+                how long since you looked — could you produce it this second? This is what falls daily.</p></div>
+            </div>
+          </div></div>
+          <div class="step"><div class="n">3</div><div>
             <h3>Revising late is worth more — until you run out of nights.</h3>
-            <p>For a single exam, revision done close to the day is worth more, simply because
-              there's less time left for it to fade. That's why cramming works, and we're not
-              going to pretend otherwise.</p>
-            <p><strong>But you can't revise 600 facts the night before.</strong> You get through
-              maybe forty in a sitting. So the nights themselves are the scarce thing — and
-              once you count them, there's a last day you can start and still finish in time.
-              That day is your cutoff, and almost nobody knows theirs.</p>
+            <p>For one fixed exam, later revision is worth more, simply because there's less time left
+              for it to fade. But you can't revise six hundred facts the night before. The nights are
+              the scarce thing — and once you count them, there's a last day you can start.</p>
+          </div></div>
+        </div>
+      </div>
+      <div class="col fillrows">
+        <div class="card">
+          <h2 class="title">Two facts, sixty days</h2>
+          <p class="sub">The steep one you barely know. The flat one is stuck.</p>
+          <figure><div id="explainCurve" class="plot loading" style="margin-top:10px">—</div></figure>
+        </div>
+        <div class="card">
+          <div class="verdict ok">
+            <div class="big">Where the AI actually is</div>
+            <div class="small">Cutoff learned those three numbers, and exactly how they move after every
+              right and wrong answer, from <strong>half a million real study records</strong>. Nobody
+              typed the rules in. That learned model draws every line here — and no chatbot is involved
+              in any of it. A language model reads your pasted syllabus, and nothing else.</div>
           </div>
         </div>
       </div>
-
-      <div class="verdict ok" style="margin-top:6px">
-        <div class="big">Where the AI actually is</div>
-        <div class="small">Cutoff learned those three numbers, and exactly how they move after
-          every right and wrong answer, from <strong>half a million real study records</strong>.
-          Nobody typed the rules in. That learned model is what draws every line on this site —
-          and no chatbot is involved in any of it.</div>
-      </div>
     </div>
   </section>
 
-  <!-- ================= 5. PROOF ================= -->
+  <!-- ===================== PROOF ===================== -->
   <section class="screen" id="screen-proof">
-    <div class="card">
-      <h2 class="title">We tested it on half a million real answers</h2>
-      <p class="sub">A tool that predicts your memory is worthless if it's wrong, so here's the
-        check. We took the study records of 40 real people, showed Cutoff only the
-        <em>early</em> part of each person's history, and asked it to predict what they'd get
-        right <em>later</em> — answers it had never seen. Then we compared its predictions to
-        what actually happened.</p>
-      <div class="stats" id="proofStats"></div>
-      <div class="scroll" style="margin-top:22px"><div id="proofTable" class="loading">—</div></div>
-      <p class="note" id="proofNote"></p>
-    </div>
-
-    <div class="card">
-      <h2 class="title">When it says "8 out of 10", do 8 out of 10 really happen?</h2>
-      <p class="sub">This is the test that matters most, because Cutoff shows you a number and
-        you're going to plan around it. Take every time it said "about 80% chance" and check
-        how many of those were actually remembered. <strong>If it's honest, the blue line sits
-        on the green one.</strong></p>
-      <div class="grid two">
-        <figure><div id="calChart" class="loading">—</div>
-          <figcaption id="calCaption"></figcaption></figure>
-        <div><div class="scroll" id="horizonTable"></div>
-          <p class="note" id="calNote"></p></div>
+    <div class="col">
+      <div class="card">
+        <h2 class="title">We tested it on half a million real answers</h2>
+        <p class="sub">We took the study records of 40 real people, showed Cutoff only the <em>early</em>
+          part of each history, and asked it to predict what they'd get right <em>later</em> — answers it
+          had never seen.</p>
+        <div class="statrow" id="proofStats" style="margin-top:14px"></div>
+        <div class="scroll" style="margin-top:16px"><div id="proofTable" class="loading">—</div></div>
+        <p class="note" id="proofNote"></p>
       </div>
-    </div>
-    <div class="card">
-      <h2 class="title">Three things we were wrong about</h2>
-      <div id="findings"></div>
+      <div class="fill split" style="height:auto">
+        <div class="card">
+          <h2 class="title">When it says "8 out of 10", do 8 in 10 happen?</h2>
+          <p class="sub">This is the test that matters, because you plan around the number.
+            If it's honest, the roast line sits on the green one.</p>
+          <figure><div id="calChart" class="plot loading" style="margin-top:10px; min-height:300px">—</div>
+            <figcaption id="calCaption"></figcaption></figure>
+        </div>
+        <div class="card">
+          <h2 class="title">And how far off, how far ahead?</h2>
+          <p class="sub">This table is where the ranges on every other screen come from.</p>
+          <div class="scroll" id="horizonTable" style="margin-top:12px"></div>
+          <p class="note" id="calNote"></p>
+        </div>
+      </div>
+      <div class="card">
+        <h2 class="title">Three things we were wrong about</h2>
+        <div id="findings" style="margin-top:6px"></div>
+      </div>
     </div>
   </section>
 
-</div>
+  </div><!-- /scroller -->
+</main>
+
 <div class="tip" id="tip"></div>
 <script src="/app.js"></script>
 </body>
