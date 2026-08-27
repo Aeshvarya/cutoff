@@ -207,6 +207,19 @@ function animate(path) {
   return path;
 }
 
+/* ============================== failure ==============================
+   Two different things can go wrong -- the model can be unreachable, or the
+   interface can throw while drawing what came back -- and they need different
+   fixes. Saying "could not reach the model" for both sends you debugging the
+   network when the bug is three lines of DOM. */
+function fail(title, err) {
+  console.error(title, err);
+  $("#bannerTitle").textContent = title;
+  $("#bannerBody").textContent = (err && (err.stack || err.message)) ? String(err.message || err) : String(err);
+  $("#banner").classList.add("on");
+}
+const clearFail = () => $("#banner").classList.remove("on");
+
 /* =============================== tooltip =============================== */
 const tip = $("#tip");
 function showTip(evt, title, value, rows = []) {
@@ -848,18 +861,25 @@ function showScreen(name) {
   $("#pageSub").textContent = SCREENS[name][1];
   $("#scroller").scrollTop = 0;
   if (location.hash.slice(1) !== name) history.replaceState(null, "", "#" + name);
-  // charts in a hidden pane have no size; give them one now that they're visible
-  requestAnimationFrame(() => $$("#screen-" + name + " .plot").forEach(repaint));
+  // charts built while their pane was hidden measured 0x0 and drew nothing;
+  // now that the pane is laid out, give them their size
+  const wake = () => $$("#screen-" + name + " .plot").forEach(repaint);
+  requestAnimationFrame(wake);
+  setTimeout(wake, 80);
   if (name === "twoexams" && !frontierPoints && state.cards.length) runFrontier();
 }
 const wanted = () => (SCREENS[location.hash.slice(1)] ? location.hash.slice(1) : "home");
 
-/* ---------------------------------- rail ---------------------------------- */
-function setRail(collapsed) {
+/* ---------------------------------- rail ----------------------------------
+   On a narrow screen the rail is an overlay, so it starts closed and closes
+   again on the way to wherever you tapped. The desktop preference is not
+   overwritten by what happens on a phone. */
+const narrow = () => matchMedia("(max-width: 860px)").matches;
+function setRail(collapsed, persist = true) {
   $("#rail").classList.toggle("collapsed", collapsed);
   $("#railToggle").querySelector(".txt").textContent = collapsed ? "Show menu" : "Hide menu";
   $("#railToggle").title = (collapsed ? "Show" : "Hide") + " the menu  ( [ )";
-  store.set("rail", collapsed);
+  if (persist && !narrow()) store.set("rail", collapsed);
   setTimeout(() => $$(".screen.active .plot").forEach(repaint), 300);
 }
 
@@ -959,8 +979,10 @@ function renderAll() {
     const day = +scrub.value;
     const host = $("#ceilingChart");
     host._lastDay = day;
-    const p = host.moveMarker ? host.moveMarker(day) : null;
-    if (!p) return;
+    // read the answer off the data, not off the chart -- the chart may not have
+    // been drawn yet (its pane can still be hidden) and the number is still true
+    const p = ceiling.curve.reduce((a, b) => (Math.abs(b.start_day - day) < Math.abs(a.start_day - day) ? b : a));
+    if (host.moveMarker) host.moveMarker(day);
     $("#scrubDay").textContent = p.start_day === 0 ? "if you start today" : `if you start on day ${p.start_day}`;
     const ok = p.best_possible >= target;
     const bb = band(p.best_possible, days);
@@ -1002,6 +1024,8 @@ async function run({ navigate = false } = {}) {
     Array.from({ length: c.n || CARDS_PER_COURSE }, (_, i) => ({ card_id: `${c.name.slice(0, 4)}-${i}`, concept: c.name, rating: c.rating })));
 
   const btn = $("#run"); btn.disabled = true; btn.textContent = "Computing…";
+  clearFail();
+  let result;
   try {
     state.cards = (await api("/api/calibrate", items)).cards;
     const payload = { cards: state.cards, days_to_exam: days, target_recall: target, max_reviews_per_day: cap };
@@ -1011,7 +1035,14 @@ async function run({ navigate = false } = {}) {
       api("/api/ceiling", payload),
       api("/api/plan", payload),
     ]);
-    Object.assign(state, { forecast, curves, ceiling, plan, isolate: null });
+    result = { forecast, curves, ceiling, plan };
+  } catch (err) {
+    btn.disabled = false; btn.textContent = "Forecast my exam →";
+    fail("Could not reach the model.", err);
+    return;
+  }
+  try {
+    Object.assign(state, { ...result, isolate: null });
     frontierPoints = null;
     renderAll();
     if (navigate) showScreen("home");
@@ -1019,7 +1050,7 @@ async function run({ navigate = false } = {}) {
     if (location.hash.slice(1) === "twoexams") runFrontier();
     requestAnimationFrame(() => $$(".screen.active .plot").forEach(repaint));
   } catch (err) {
-    alert("Could not reach the model: " + err.message);
+    fail("The model answered, but the interface failed while drawing it.", err);
   } finally {
     btn.disabled = false; btn.textContent = "Forecast my exam →";
   }
@@ -1031,7 +1062,7 @@ async function runFrontier() {
   if (!state.cards.length) return;
   const first = +$("#exam1").value, second = +$("#exam2").value;
   const budget = Math.round(+$("#budget").value / 0.5);
-  if (second <= first) { alert("The second exam has to come after the first."); return; }
+  if (second <= first) { fail("The second exam has to come after the first.", "Set end-sems to a later day than mid-sems."); return; }
   const btn = $("#runFrontier"); btn.disabled = true; btn.textContent = "Computing…";
   // eight full schedules, simulated night by night -- say so rather than
   // showing an empty card for eight seconds
@@ -1069,7 +1100,7 @@ async function runFrontier() {
       <div class="small">Identical nights. Identical effort. No schedule wins both, so this is a choice you are
         making whether or not you know you are making it.</div></div>`;
   } catch (err) {
-    alert("Could not compute the frontier: " + err.message);
+    fail("Could not compute the frontier.", err);
   } finally { btn.disabled = false; btn.textContent = "Compute the frontier"; }
 }
 
@@ -1188,9 +1219,19 @@ async function readSyllabus({ seedRatings = false } = {}) {
 }
 
 /* ================================== boot ================================== */
-$$(".navbtn[data-screen]").forEach((b) => b.addEventListener("click", () => showScreen(b.dataset.screen)));
+$("#bannerClose").addEventListener("click", clearFail);
+addEventListener("error", (e) => fail("Something in the interface broke.", e.error || e.message));
+addEventListener("unhandledrejection", (e) => fail("Something in the interface broke.", e.reason));
+// delegation, so a nav button added later still works and a click on the icon
+// inside it still counts
+$("#rail").addEventListener("click", (e) => {
+  const b = e.target.closest(".navbtn[data-screen]");
+  if (!b) return;
+  showScreen(b.dataset.screen);
+  if (narrow()) setRail(true, false);
+});
 $("#railToggle").addEventListener("click", () => setRail(!$("#rail").classList.contains("collapsed")));
-$("#railOpen").addEventListener("click", () => setRail(false));
+$("#railOpen").addEventListener("click", () => setRail(false, false));
 $("#run").addEventListener("click", () => run({ navigate: true }));
 $("#runFrontier").addEventListener("click", runFrontier);
 $("#readSyllabus").addEventListener("click", () => readSyllabus());
@@ -1227,7 +1268,7 @@ addEventListener("resize", () => $$(".screen.active .plot").forEach(repaint));
 (function init() {
   const d = new Date(); d.setDate(d.getDate() + 87);
   $("#examdate").value = d.toISOString().slice(0, 10);
-  setRail(store.get("rail", false));
+  setRail(narrow() ? true : store.get("rail", false), false);
   $("#exactToggle").setAttribute("aria-pressed", String(state.exact));
   $("#exactToggle").textContent = state.exact ? "showing exact" : "exact figures";
   renderCourses();
