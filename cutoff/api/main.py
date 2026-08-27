@@ -15,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -355,5 +355,10 @@ if WEB.exists():
         return FileResponse(WEB / "app.js", media_type="application/javascript", headers=NO_STORE)
 
     @app.get("/")
-    def index() -> FileResponse:
-        return FileResponse(WEB / "index.html", headers=NO_STORE)
+    def index() -> HTMLResponse:
+        # Stamp the script URL with app.js's mtime. no-store stops the next
+        # visitor caching a stale file; the stamp evicts one a visitor is
+        # already holding, which no response header can do.
+        stamp = int((WEB / "app.js").stat().st_mtime)
+        html = (WEB / "index.html").read_text(encoding="utf-8").replace('src="/app.js"', f'src="/app.js?v={stamp}"')
+        return HTMLResponse(html, headers=NO_STORE)
