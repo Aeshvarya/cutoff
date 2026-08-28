@@ -1,10 +1,10 @@
 {
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "functions": {
-    "api/index.py": {
-      "maxDuration": 60,
-      "includeFiles": "{web,artifacts,cutoff}/**"
+  "builds": [
+    {
+      "src": "api/index.py",
+      "use": "@vercel/python",
+      "config": { "includeFiles": ["web/**", "artifacts/**", "cutoff/**"] }
     }
-  },
-  "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }]
+  ],
+  "routes": [{ "src": "/(.*)", "dest": "/api/index.py" }]
 }

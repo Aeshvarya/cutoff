@@ -1432,11 +1432,14 @@ async function runFrontier() {
   try {
     const data = await api("/api/frontier", {
       cards: state.cards, first_exam_day: first, second_exam_day: second, budget,
-      max_reviews_per_day: +$("#cap").value || 40, weights: [0, 0.3, 0.42, 0.48, 0.52, 0.58, 0.7, 1.0],
+      max_reviews_per_day: +$("#cap").value || 40, weights: [0, 0.35, 0.45, 0.55, 0.7, 1.0],
     });
     frontierPoints = renderFrontier(data);
     $("#frontierCaption").textContent = `Every dot is a real plan using the same ${Math.round(data.minutes)} minutes. ` +
-      `Up is better at mid-sems, right is better at end-sems. Grey dots lose at BOTH — never pick one. Click a dot to select it.`;
+      `Up is better at mid-sems, right is better at end-sems. Grey dots lose at BOTH — never pick one. Click a dot to select it.` +
+      (data.facts_simulated < data.facts_total
+        ? ` Each plan is simulated night by night on ${data.facts_simulated} of your ${data.facts_total} facts, evenly sampled — the shape of the trade-off is the same and the wait is not.`
+        : "");
     const slider = $("#tradeoff");
     const update = () => {
       const w = +slider.value / 100;

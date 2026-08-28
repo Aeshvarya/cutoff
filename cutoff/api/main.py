@@ -80,6 +80,30 @@ class PlanRequest(ForecastRequest):
     max_reviews_per_day: int = Field(default=40, gt=0)
 
 
+# Both heavy endpoints are pure functions of their request, so the same request
+# never needs computing twice. A warm instance answers a repeat click instantly;
+# a cold one pays the cost once. Capped, because this is a serverless process
+# and memory is the thing you run out of.
+_MEMO: dict[str, dict] = {}
+_MEMO_MAX = 24
+
+
+def _memo(key: str, compute):
+    hit = _MEMO.get(key)
+    if hit is not None:
+        return {**hit, "cached": True}
+    value = compute()
+    if len(_MEMO) >= _MEMO_MAX:
+        _MEMO.pop(next(iter(_MEMO)))
+    _MEMO[key] = value
+    return {**value, "cached": False}
+
+
+def _key(*parts) -> str:
+    import hashlib, json as _json
+    return hashlib.sha1(_json.dumps(parts, sort_keys=True, default=str).encode()).hexdigest()
+
+
 def _to_states(cards: list[CardIn]) -> list[CardState]:
     if not cards:
         raise HTTPException(400, "no cards supplied")
@@ -255,6 +279,9 @@ def ceiling(request: PlanRequest) -> dict:
     days = request.days_to_exam
     cap = request.max_reviews_per_day
 
+    key = _key("ceiling", [(c.card_id, c.stability, c.difficulty, c.last_review_day) for c in cards],
+               days, cap, request.target_recall)
+
     def best_possible(start_day: int) -> float:
         states = {c.card_id: CardState(c.card_id, c.concept, c.stability, c.difficulty, c.last_review_day)
                   for c in cards}
@@ -264,8 +291,10 @@ def ceiling(request: PlanRequest) -> dict:
                 states[card.card_id] = review_outcome(card, day, W)
         return float(np.mean([c.recall_on(days, W) for c in states.values()]))
 
-    step = max(1, days // 24)
-    sampled = {d: best_possible(d) for d in range(0, days, step)}
+    # Twenty sample points draw the same cliff as forty and cost half as much on
+    # a small serverless core, where this is the slowest thing the app does.
+    step = max(1, days // 20)
+    sampled = _memo(key, lambda: {"curve": {d: best_possible(d) for d in range(0, days, step)}})["curve"]
 
     # The ceiling falls as you start later, so the deadline is the last sampled
     # start day whose ceiling still clears the target.
@@ -301,17 +330,34 @@ def two_exam_frontier(request: FrontierRequest) -> dict:
         raise HTTPException(400, "the second exam must come after the first")
 
     cards = _to_states(request.cards)
-    points = frontier(
-        cards, request.first_exam_day, request.second_exam_day, W,
-        budget=request.budget, max_reviews_per_day=request.max_reviews_per_day,
+
+    # Each point here is a full schedule simulated night by night, so the cost is
+    # cards x nights x weights. Past a few hundred facts the shape of the
+    # trade-off stops changing but the wait does not, so we run it on an evenly
+    # spaced sample and say so on screen.
+    SAMPLE = 300
+    sampled_cards, scale = cards, 1.0
+    if len(cards) > SAMPLE:
+        stride = len(cards) / SAMPLE
+        sampled_cards = [cards[int(i * stride)] for i in range(SAMPLE)]
+        scale = len(sampled_cards) / len(cards)
+
+    key = _key("frontier", [(c.card_id, c.stability, c.difficulty) for c in sampled_cards],
+               request.first_exam_day, request.second_exam_day, request.budget,
+               request.max_reviews_per_day, request.weights)
+    points = _memo(key, lambda: {"points": frontier(
+        sampled_cards, request.first_exam_day, request.second_exam_day, W,
+        budget=max(1, round(request.budget * scale)), max_reviews_per_day=request.max_reviews_per_day,
         weights=request.weights,
-    )
+    )})["points"]
     flags = dominated(points)
     return {
         "first_exam_day": request.first_exam_day,
         "second_exam_day": request.second_exam_day,
         "budget": request.budget,
         "minutes": request.budget * 0.5,
+        "facts_simulated": len(sampled_cards),
+        "facts_total": len(cards),
         "points": [
             {"weight": p.weight, "recall_first": p.recall_first, "recall_second": p.recall_second,
              "average": p.average, "reviews_before_first": p.reviews_before_first,

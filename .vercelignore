@@ -1,0 +1,16 @@
+# Everything the running service does not need. The raw corpora are hundreds of
+# megabytes and training never happens in production -- the shipped model is a
+# sixteen-float JSON.
+.venv/
+data/
+docs/
+scripts/
+tests/
+requirements-dev.txt
+.git/
+.github/
+__pycache__/
+*.pyc
+.DS_Store
+render.yaml
+Dockerfile
