@@ -1095,25 +1095,77 @@ function renderFindings() {
       <div style="color:var(--text-secondary);font-size:13px;line-height:1.6">${b}</div></div>`).join("");
 }
 
-/* ============================== the explainer ============================== */
-function renderExplainCurve() {
-  chart($("#explainCurve"), (svg, W, H) => {
-    const box = { x: 42, y: 14, w: W - 56, h: H - 40, min: 0.4, max: 1 };
-    if (box.w < 60 || box.h < 50) return;
-    grid(svg, box, [0.4, 0.7, 1], (t) => Math.round(t * 100) + "%");
-    const DAYS = 60;
-    const X = (d) => box.x + (d / DAYS) * box.w;
+/* ====================== the model, made touchable ======================
+   Two panels that exist for one reason: a judge should be able to see the
+   machine learning, not take our word for it. The sixteen fitted floats are
+   printed in full, and the probe runs one fact through the same functions the
+   planner calls -- if this ever disagreed with the forecast, the forecast is
+   the thing that would be wrong. */
+function renderModelParams(data) {
+  const host = $("#paramGrid");
+  if (!host) return;
+  host.innerHTML = "";
+  for (const p of data.parameters) {
+    const d = document.createElement("div"); d.className = "param";
+    const v = document.createElement("div"); v.className = "v";
+    v.textContent = Math.abs(p.value) >= 100 ? p.value.toFixed(1) : p.value.toFixed(4);
+    if (p.unit) { const u = document.createElement("small"); u.textContent = p.unit; v.append(u); }
+    const n = document.createElement("div"); n.className = "n"; n.textContent = `w${p.i} · ${p.note}`;
+    d.append(v, n); host.append(d);
+  }
+}
+
+let probeTimer = null;
+function probeInputs() {
+  return { stability: +$("#probeS").value, elapsed: +$("#probeE").value, difficulty: +$("#probeD").value, days: 60 };
+}
+async function runProbe() {
+  const q = probeInputs();
+  $("#probeSv").textContent = q.stability;
+  $("#probeEv").textContent = q.elapsed;
+  $("#probeDv").textContent = q.difficulty;
+  let d;
+  try { d = await api("/api/card", q); } catch (e) { return fail("Could not reach the model.", e); }
+
+  const SERIES = [
+    ["do nothing", d.do_nothing, css("--context"), "4 4"],
+    ["you blank on it tonight", d.if_forgotten, css("--critical"), "2 4"],
+    ["you get it right tonight", d.if_reviewed, css("--series-1"), null],
+  ];
+  chart($("#probeChart"), (svg, W, H) => {
+    // zoomed to the data, like every other curve here, or three lines that
+    // differ by twenty points all sit in the top fifth of the axis
+    const lowest = Math.min(...SERIES.flatMap(([, pts]) => pts.map((p) => p.recall)));
+    const floor = Math.max(0, Math.floor((lowest - 0.08) * 10) / 10);
+    const box = { x: 40, y: 14, w: W - 54, h: H - 40, min: floor, max: 1 };
+    if (box.w < 60 || box.h < 60) return;
+    grid(svg, box, [floor, (floor + 1) / 2, 1], (t) => Math.round(t * 100) + "%");
+    const X = (day) => box.x + (day / d.days) * box.w;
     const Y = (r) => box.y + box.h - (r - box.min) / (box.max - box.min) * box.h;
-    const decay = (t, S) => Math.pow(1 + (Math.pow(0.9, -1 / 0.5) - 1) * t / S, -0.5);
-    for (const [S, colour, lab] of [[4, css("--series-1"), "barely learned"], [45, css("--series-2"), "properly stuck"]]) {
-      animate(el("path", { d: line(Array.from({ length: 60 }, (_, i) => [X(i), Y(decay(i, S))])), fill: "none",
-        stroke: colour, "stroke-width": 2.5, "stroke-linecap": "round" }, svg));
-      text(svg, X(DAYS) - 4, Y(decay(DAYS - 1, S)) - 9, lab, { anchor: "end", fill: colour, size: 12, weight: 620 });
+    for (const [, pts, colour, dash] of SERIES) {
+      const path = el("path", { d: line(pts.map((p) => [X(p.day), Y(p.recall)])), fill: "none",
+        stroke: colour, "stroke-width": dash ? 1.8 : 2.6, "stroke-linecap": "round" }, svg);
+      if (dash) path.setAttribute("stroke-dasharray", dash);
     }
+    el("circle", { cx: X(0), cy: Y(d.recall_today), r: 4, fill: css("--crema") }, svg);
     axis(svg, box);
-    for (const d of [0, 30, 59]) text(svg, X(d), box.y + box.h + 17, d === 0 ? "today" : `${d + 1} days later`,
-      { anchor: d === 0 ? "start" : d === 59 ? "end" : "middle" });
+    for (const day of [0, Math.round(d.days / 2), d.days])
+      text(svg, X(day), box.y + box.h + 17, day === 0 ? "tonight" : `day ${day}`,
+        { anchor: day === 0 ? "start" : day === d.days ? "end" : "middle" });
   });
+  $("#probeLegend").innerHTML = SERIES.map(([label, , colour]) =>
+    `<li><span class="swatch" style="background:${colour}"></span>${label}</li>`).join("");
+  $("#probeRead").innerHTML =
+    `<span>you'd recall it right now <span class="rv num">${pct0(d.recall_today)}</span></span>` +
+    `<span>one right answer takes it from <span class="rv num">${d.stability_now.toFixed(1)}</span> to ` +
+    `<span class="rv num">${d.stability_if_recalled.toFixed(1)} days</span></span>` +
+    `<span>one blank drops it to <span class="rv num">${d.stability_if_lapsed.toFixed(1)}</span></span>`;
+}
+function wireProbe() {
+  for (const id of ["#probeS", "#probeE", "#probeD"]) {
+    const el2 = $(id); if (!el2) continue;
+    el2.addEventListener("input", () => { clearTimeout(probeTimer); probeTimer = setTimeout(runProbe, 90); });
+  }
 }
 
 /* ================================ courses ================================ */
@@ -1606,7 +1658,9 @@ addEventListener("resize", () => $$(".screen.active .plot").forEach(repaint));
   $("#exactToggle").textContent = state.exact ? "showing exact" : "exact figures";
   renderCourses();
   renderFindings();
-  renderExplainCurve();
+  wireProbe();
+  runProbe();
+  api("/api/model").then(renderModelParams).catch(() => {});
   timerSet(timer.minutes);
   renderCups();
   renderFocusTarget();

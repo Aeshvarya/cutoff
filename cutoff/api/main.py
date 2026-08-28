@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from cutoff.core.forecast import CardState, review_outcome
+from cutoff.model.dsr import _next_stability, retrievability
 from cutoff.core.multi import dominated, frontier
 from cutoff.core.planner import plan
 from cutoff.ingest import llm as llm_ingest
@@ -317,6 +318,82 @@ def two_exam_frontier(request: FrontierRequest) -> dict:
              "reviews_after_first": p.reviews_after_first, "dominated": d}
             for p, d in zip(points, flags)
         ],
+    }
+
+
+# The sixteen numbers, and what each one governs. Named here rather than in the
+# client so the labels cannot drift away from the code that uses them.
+PARAMETER_NOTES = [
+    ("stability after a first review you rated 'again'", "days"),
+    ("stability after a first review you rated 'hard'", "days"),
+    ("stability after a first review you rated 'good'", "days"),
+    ("stability after a first review you rated 'easy'", "days"),
+    ("where difficulty starts before any review", "1-10"),
+    ("how fast a better first rating lowers difficulty", ""),
+    ("how far one review moves difficulty", ""),
+    ("how strongly difficulty reverts to the easy anchor", ""),
+    ("base stability gain when you remember", "log"),
+    ("saturation: the gain shrinks as stability grows", ""),
+    ("the spacing effect: the gain grows as recall falls", ""),
+    ("where stability lands after you forget", ""),
+    ("how much harder cards are punished by forgetting", ""),
+    ("how much of the old stability survives a lapse", ""),
+    ("the spacing effect, again, for lapses", ""),
+    ("decay: the shape of the forgetting curve itself", ""),
+]
+
+
+@app.get("/api/model")
+def model() -> dict:
+    """The fitted model, in full. There is nothing else in it."""
+    return {
+        "source": "artifacts/dsr.json",
+        "fitted": (ARTIFACTS / "dsr.json").exists(),
+        "parameters": [
+            {"i": i, "value": float(W[i]), "note": PARAMETER_NOTES[i][0], "unit": PARAMETER_NOTES[i][1]}
+            for i in range(len(W))
+        ],
+    }
+
+
+class CardProbe(BaseModel):
+    """One fact, and what a review tonight would do to it."""
+
+    stability: float = Field(gt=0, le=400)
+    difficulty: float = Field(ge=1, le=10)
+    days: int = Field(gt=0, le=400)
+    elapsed: float = Field(default=0.0, ge=0, le=400, description="days since you last looked at it")
+
+
+@app.post("/api/card")
+def card_probe(request: CardProbe) -> dict:
+    """Three futures for a single fact: leave it, review it, or blank on it.
+
+    Same functions the planner calls. Nothing here is a demonstration path --
+    if this disagreed with the forecast, the forecast would be the thing wrong.
+    """
+    now = CardState("probe", "probe", request.stability, request.difficulty, -request.elapsed)
+    r_today = now.recall_on(0.0, W)
+
+    arr = lambda v: np.array([v], dtype=np.float64)
+    after = lambda rating: float(
+        _next_stability(arr(now.stability), arr(now.difficulty), arr(r_today), arr(rating), W)[0]
+    )
+    recalled, lapsed = after(3), after(1)
+
+    days = np.linspace(0, request.days, 60)
+    trace = lambda stability: [
+        {"day": float(d), "recall": float(retrievability(float(d), stability, W[15]))} for d in days
+    ]
+    return {
+        "days": request.days,
+        "recall_today": r_today,
+        "stability_now": request.stability,
+        "stability_if_recalled": recalled,
+        "stability_if_lapsed": lapsed,
+        "do_nothing": [{"day": float(d), "recall": now.recall_on(float(d), W)} for d in days],
+        "if_reviewed": trace(recalled),
+        "if_forgotten": trace(lapsed),
     }
 
 

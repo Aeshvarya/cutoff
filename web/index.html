@@ -406,6 +406,19 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border: 3px sol
 .tcell .k { font-weight: 620; font-size: 13.5px; margin-bottom: 5px; }
 .tcell p { font-size: 12.5px; margin: 0; color: var(--text-secondary); }
 
+/* the model, laid out where anyone can count it */
+.params { display: grid; grid-template-columns: repeat(auto-fill, minmax(158px, 1fr)); gap: 8px; }
+.param { background: var(--glass-low); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 9px 11px; }
+.param .v { font-size: 15px; font-weight: 620; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.param .v small { color: var(--text-muted); font-size: 10px; font-weight: 500; margin-left: 3px; }
+.param .n { color: var(--text-muted); font-size: 10.5px; line-height: 1.4; margin-top: 3px; }
+.probegrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px 16px; margin-top: 14px; }
+.probegrid label { display: block; color: var(--text-muted); font-size: 11px; text-transform: uppercase;
+                   letter-spacing: .07em; font-weight: 600; }
+.probegrid label b { color: var(--text-primary); text-transform: none; letter-spacing: 0; font-size: 12.5px; }
+.probegrid input { margin-top: 8px; }
+code { font: 500 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--crema); }
+
 .tradegrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
 .tradecell { background: var(--glass-low); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 14px; }
 .tradecell .k { color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em; font-weight: 600; }
@@ -807,9 +820,27 @@ textarea { resize: vertical; font: 400 12.5px/1.7 ui-monospace, SFMono-Regular, 
       </div>
       <div class="col fillrows">
         <div class="card">
-          <h2 class="title">Two facts, sixty days</h2>
-          <p class="sub">The steep one you barely know. The flat one is stuck.</p>
-          <figure><div id="explainCurve" class="plot loading" style="margin-top:10px">—</div></figure>
+          <h2 class="title">Watch it work on one fact</h2>
+          <p class="sub">Move the sliders. Every line here is drawn by the same fitted model that draws
+            your forecast — there is no separate demo path, and no language model is anywhere near it.</p>
+          <ul class="legend" id="probeLegend" style="margin-top:12px"></ul>
+          <figure><div id="probeChart" class="plot loading">—</div></figure>
+          <div class="probegrid">
+            <label>how well it's stuck <b><span id="probeSv">8</span> days</b>
+              <input type="range" id="probeS" min="1" max="60" step="1" value="8"></label>
+            <label>days since you looked <b><span id="probeEv">14</span></b>
+              <input type="range" id="probeE" min="0" max="60" step="1" value="14"></label>
+            <label>how hard it is <b><span id="probeDv">5.5</span> / 10</b>
+              <input type="range" id="probeD" min="1" max="10" step="0.5" value="5.5"></label>
+          </div>
+          <div class="readpanel" id="probeRead"></div>
+        </div>
+        <div class="card">
+          <h2 class="title">The model, in sixteen numbers</h2>
+          <p class="sub">This is the whole thing. Sixteen floats, fitted by us on 40 real collections,
+            committed to the repo as <code>artifacts/dsr.json</code>. Nobody typed a rule in, and there
+            is nothing else in the box.</p>
+          <div class="params" id="paramGrid" style="margin-top:12px"></div>
         </div>
         <div class="card">
           <div class="verdict ok">
