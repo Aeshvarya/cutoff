@@ -2,6 +2,9 @@
 
 **What you'll remember on exam morning — and the last day you can still do something about it.**
 
+**▶ Live: [cutoff-gray.vercel.app](https://cutoff-gray.vercel.app)** — it loads with a real semester already
+forecast, so there is nothing to sign up for and nothing to fill in first.
+
 Paste your syllabus. Say how well you know each subject. Cutoff forecasts, per
 concept, the probability you'll still recall it on the morning of your exam —
 then finds the smallest schedule that gets you to your target, and the **last
@@ -163,7 +166,8 @@ uvicorn cutoff.api.main:app --reload
 # → http://127.0.0.1:8000
 ```
 
-One service, one origin: the API serves the interface from its own port, so
+Deployed on Vercel from `api/index.py`; the Render blueprint in `render.yaml`
+runs the same app unchanged. One service, one origin: the API serves the interface from its own port, so
 there is no API base URL to configure and no CORS to get wrong. The interface is
 hand-written — no bundler, no build step, and the charts are drawn in SVG rather
 than pulled from a chart library. Because there is no bundler to fingerprint the
