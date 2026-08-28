@@ -1245,25 +1245,67 @@ function setRail(collapsed, persist = true) {
 function renderAll() {
   const { forecast, ceiling, plan, curves, days, target, cap } = state;
   if (!forecast) return;
+
+  /* The forecast lands in about a second; the ceiling takes six, because it
+     simulates twenty different start days night by night. So draw everything
+     the forecast alone can answer first -- the cup, the headline, the subjects,
+     both charts -- and let the deadline arrive when it arrives. Nobody should
+     watch a shimmer for six seconds to find out we are working. */
+  const partial = !ceiling || !plan;
+  const overallEarly = figure(forecast.overall_recall, days);
+  const weakestEarly = forecast.per_concept[0];
+
+  $("#chipDays").innerHTML = `<span class="d" style="background:var(--series-2)"></span>exam in <b>${days} days</b>`;
+  $("#cupWords").textContent = state.exact ? pct(forecast.overall_recall) : overallEarly.head;
+  $("#cupRange").innerHTML = `of your syllabus — <b>${scaleWord(overallEarly.b.mid)}</b> — on exam morning, if you did nothing between now and then.<br>` + overallEarly.sub;
+  renderScale($("#cupScale"), overallEarly.b, target);
+  $("#heroWords").textContent = state.exact ? pct(forecast.overall_recall) : overallEarly.head;
+  $("#heroRange").innerHTML = `of your syllabus, on exam morning, if you did nothing between now and then. ` + overallEarly.sub;
+  renderDecay(curves.series, days, forecast.weakest_concept);
+  $("#decayCaption").textContent = `Drawn by the memory model we trained, not by a chatbot. The scale starts at ` +
+    `${Math.round(decayFloor(curves.series) * 100)}% so the subjects separate instead of stacking in the top third.`;
+  renderConcepts(forecast.per_concept, days, target);
+  $("#forecastStats").innerHTML = [
+    ["days to exam", String(days), ""],
+    ["facts tracked", state.cards.length.toLocaleString(), ""],
+    ["weakest", forecast.weakest_concept, state.exact ? pct(weakestEarly.recall) : scaleWord(band(weakestEarly.recall, days).mid)],
+    ["you'd lose", state.exact ? pct0(1 - forecast.overall_recall) : `~${Math.round((1 - overallEarly.b.mid) * 10)} in 10`, "of the syllabus"],
+  ].map(([k, v, s2]) => `<div class="stat"><div class="k">${k}</div><div class="v" style="font-size:${String(v).length > 12 ? 15 : 20}px">${v}</div>${s2 ? `<div class="s">${s2}</div>` : ""}</div>`).join("");
+  $("#subjectCards").innerHTML = forecast.per_concept.map((c) => {
+    const b = band(c.recall, days);
+    const h = b.mid >= target ? ["var(--good)", "fine"] : b.mid >= target - 0.15 ? ["var(--warning)", "slipping"] : ["var(--critical)", "needs you"];
+    const pips = [...Array(5)].map((_, i) => `<i style="background:${i < Math.round(b.mid * 5) ? h[0] : "rgba(255,235,212,.14)"}"></i>`).join("");
+    return `<div class="subj" title="${pct(c.recall)} raw · ${pct0(b.lo)}–${pct0(b.hi)} calibrated · ${c.n_cards} facts">
+      <div class="nm">${c.concept}</div><div class="pips">${pips}</div>
+      <div class="wd">${state.exact ? pct(c.recall) : scaleWord(b.mid)}</div>
+      <div class="st" style="color:${h[0]}">${h[1]} · ${state.exact ? "" : pct0(b.lo) + "–" + pct0(b.hi)}</div></div>`;
+  }).join("");
+
+  if (partial) {
+    $("#chipCutoff").innerHTML = `<span class="d" style="background:var(--text-muted)"></span>working out your cutoff…`;
+    renderCup(state.exact ? forecast.overall_recall : overallEarly.b.mid, target, 1, false, "—");
+    renderGauge(state.exact ? forecast.overall_recall : overallEarly.b.mid, target, 1, false);
+    $("#verdict").innerHTML = $("#verdict2").innerHTML =
+      `<div class="verdict ok"><div class="big">Working out the last day you can start…</div>
+       <div class="small">Twenty different start days, each one simulated night by night to the exam. A few seconds.</div></div>`;
+    return;
+  }
+
   const dl = ceiling.latest_start_day;
   const gone = dl === null;
   const overall = figure(forecast.overall_recall, days);
   const weakest = forecast.per_concept[0];
 
   /* --- top bar --- */
-  $("#chipDays").innerHTML = `<span class="d" style="background:var(--series-2)"></span>exam in <b>${days} days</b>`;
   $("#chipCutoff").innerHTML = gone
     ? `<span class="d" style="background:var(--critical)"></span><b>cutoff passed</b>`
     : `<span class="d" style="background:${dl > days * 0.4 ? "var(--good)" : dl > days * 0.15 ? "var(--warning)" : "var(--critical)"}"></span>start by <b>day ${dl}</b>`;
   $("#focusDot").style.display = timer.running ? "block" : "none";
 
-  /* --- the cup --- */
+  /* --- the cup, now that we know how much of the window is left --- */
   const shown = state.exact ? forecast.overall_recall : overall.b.mid;
   renderCup(shown, target, gone ? 0 : dl / days, gone, gone ? 0 : dl);
   renderGauge(shown, target, gone ? 0 : dl / days, gone);
-  $("#cupWords").textContent = state.exact ? pct(forecast.overall_recall) : overall.head;
-  $("#cupRange").innerHTML = `of your syllabus — <b>${scaleWord(overall.b.mid)}</b> — on exam morning, if you did nothing between now and then.<br>` + overall.sub;
-  renderScale($("#cupScale"), overall.b, target);
   $("#cupStats").innerHTML = [
     ["days you can wait", gone ? "0" : String(dl), gone ? "the window closed" : "before the target goes"],
     ["your target", pct0(target), "on exam morning"],
@@ -1296,31 +1338,6 @@ function renderAll() {
   items.push(["3", `Fix ${weakest.concept} first.`, `Weakest at ${scaleWord(band(weakest.recall, days).mid)}, so an hour there is worth more than an hour anywhere else.`, false]);
   $("#todo").innerHTML = items.map(([n, t, d, hot]) =>
     `<div class="todo ${hot ? "hot" : ""}"><div class="badge">${n}</div><div><div class="tt">${t}</div><div class="td">${d}</div></div></div>`).join("");
-
-  /* --- subject strip --- */
-  $("#subjectCards").innerHTML = forecast.per_concept.map((c) => {
-    const b = band(c.recall, days);
-    const h = b.mid >= target ? ["var(--good)", "fine"] : b.mid >= target - 0.15 ? ["var(--warning)", "slipping"] : ["var(--critical)", "needs you"];
-    const pips = [...Array(5)].map((_, i) => `<i style="background:${i < Math.round(b.mid * 5) ? h[0] : "rgba(255,235,212,.14)"}"></i>`).join("");
-    return `<div class="subj" title="${pct(c.recall)} raw · ${pct0(b.lo)}–${pct0(b.hi)} calibrated · ${c.n_cards} facts">
-      <div class="nm">${c.concept}</div><div class="pips">${pips}</div>
-      <div class="wd">${state.exact ? pct(c.recall) : scaleWord(b.mid)}</div>
-      <div class="st" style="color:${h[0]}">${h[1]} · ${state.exact ? "" : pct0(b.lo) + "–" + pct0(b.hi)}</div></div>`;
-  }).join("");
-
-  /* --- forecast screen --- */
-  $("#heroWords").textContent = state.exact ? pct(forecast.overall_recall) : overall.head;
-  $("#heroRange").innerHTML = `of your syllabus, on exam morning, if you did nothing between now and then. ` + overall.sub;
-  $("#forecastStats").innerHTML = [
-    ["days to exam", String(days), ""],
-    ["facts tracked", state.cards.length.toLocaleString(), ""],
-    ["weakest", forecast.weakest_concept, state.exact ? pct(weakest.recall) : scaleWord(band(weakest.recall, days).mid)],
-    ["you'd lose", state.exact ? pct0(1 - forecast.overall_recall) : `~${Math.round((1 - overall.b.mid) * 10)} in 10`, "of the syllabus"],
-  ].map(([k, v, s]) => `<div class="stat"><div class="k">${k}</div><div class="v" style="font-size:${String(v).length > 12 ? 15 : 20}px">${v}</div>${s ? `<div class="s">${s}</div>` : ""}</div>`).join("");
-  renderDecay(curves.series, days, forecast.weakest_concept);
-  $("#decayCaption").textContent = `Drawn by the memory model we trained, not by a chatbot. The scale starts at ` +
-    `${Math.round(decayFloor(curves.series) * 100)}% so the subjects separate instead of stacking in the top third.`;
-  renderConcepts(forecast.per_concept, days, target);
 
   /* --- cutoff screen --- */
   renderCeiling(ceiling, days, target);
@@ -1389,12 +1406,16 @@ async function run({ navigate = false } = {}) {
   try {
     state.cards = (await api("/api/calibrate", items)).cards;
     const payload = { cards: state.cards, days_to_exam: days, target_recall: target, max_reviews_per_day: cap };
-    const [forecast, curves, ceiling, plan] = await Promise.all([
+    const slow = Promise.all([api("/api/ceiling", payload), api("/api/plan", payload)]);
+    const [forecast, curves] = await Promise.all([
       api("/api/forecast", { cards: state.cards, days_to_exam: days }),
       api("/api/curves", { cards: state.cards, days_to_exam: days }),
-      api("/api/ceiling", payload),
-      api("/api/plan", payload),
     ]);
+    Object.assign(state, { forecast, curves, ceiling: null, plan: null, isolate: null });
+    renderAll();                                    // the cup, immediately
+    if (navigate) showScreen("home");
+    requestAnimationFrame(() => $$(".screen.active .plot").forEach(repaint));
+    const [ceiling, plan] = await slow;
     result = { forecast, curves, ceiling, plan };
   } catch (err) {
     btn.disabled = false; btn.textContent = "Forecast my exam →";
